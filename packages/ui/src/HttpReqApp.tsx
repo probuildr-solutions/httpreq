@@ -27,6 +27,7 @@ import {
   createId,
   detectCapabilities,
   DOCUMENTATION_URL,
+  type BuildInfo,
   type DesktopBridge,
   type HistoryEntry,
   type HistoryRepository,
@@ -37,6 +38,7 @@ import {
   type OAuth2Auth,
   type WorkspaceRepository,
 } from '@httpreq/shared';
+import { getAncestors } from '@httpreq/workspace';
 import './app.css';
 import { readAttachment } from './attachments';
 import { AuthServicesContext, type AuthServices } from './auth/authServices';
@@ -47,6 +49,8 @@ import { useShortcutManager } from './commands';
 import { closeTabs as closeRequestTabs } from './closeTabs';
 import { ConfirmDialog } from './ConfirmDialog';
 import { preloadEditor } from './editor/preloadEditor';
+import { ExportDialog } from './export/ExportDialog';
+import { openExportDialog } from './export/exportDialogStore';
 import { ImportDialog } from './import/ImportDialog';
 import { openImportDialog } from './import/importDialogStore';
 import {
@@ -81,6 +85,14 @@ import { Z_LAYERS } from './zLayers';
 import { TitleBar } from './TitleBar';
 import { usePersistence } from './usePersistence';
 import { useRequestExecution } from './useRequestExecution';
+import {
+  checkForUpdates as runUpdateCheck,
+  deploymentCheck,
+  githubReleaseCheck,
+  useUpdates,
+  useUpdateService,
+  type UpdateInfo,
+} from './updates';
 import { VariableContext, type VariableScope } from './variableContext';
 import classes from './HttpReqApp.module.css';
 
@@ -103,7 +115,15 @@ interface Props {
    * reported honestly rather than assumed.
    */
   bridge?: HttpReqBridge;
+  /** Version only, for hosts that do not know their build; prefer {@link build}. */
   version?: string;
+  /** Version, commit and build time of the running bundle. */
+  build?: BuildInfo;
+  /**
+   * Whether to look for newer versions: GitHub releases on the desktop, a newer deployment in
+   * the browser. Off for development builds.
+   */
+  checkForUpdates?: boolean;
 }
 
 const menus: MenuDefinition[] = [
@@ -116,6 +136,7 @@ const menus: MenuDefinition[] = [
       { command: 'collection.new' },
       { separator: true },
       { command: 'file.import' },
+      { command: 'file.export' },
       { separator: true },
       { command: 'request.save' },
       { separator: true },
@@ -183,6 +204,7 @@ const menus: MenuDefinition[] = [
       { separator: true },
       { command: 'help.devtools' },
       { separator: true },
+      { command: 'help.check-updates' },
       { command: 'help.about' },
     ],
   },
@@ -199,7 +221,17 @@ function ActiveResponse({ requestId, loading }: { requestId: string; loading: bo
   return <ResponsePanel response={response} loading={loading} />;
 }
 
-export function HttpReqApp({ runtime, repository, history, desktop, bridge, version }: Props) {
+export function HttpReqApp({
+  runtime,
+  repository,
+  history,
+  desktop,
+  bridge,
+  version: versionProp,
+  build,
+  checkForUpdates = false,
+}: Props) {
+  const version = build?.version ?? versionProp;
   const [opened, { toggle, close: closeNav }] = useDisclosure();
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const { toggleColorScheme } = useMantineColorScheme();
@@ -302,7 +334,7 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
                 id: sessionId,
                 kind: 'ssh',
                 name: session.name,
-                connected: session.status === 'connected',
+                status: session.status,
               },
             ]
           : [];
@@ -534,6 +566,83 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
     else window.open(DOCUMENTATION_URL, '_blank', 'noopener,noreferrer');
   }, [desktop]);
 
+  /* Updates: GitHub releases for the desktop app, the deployed build for the web app. */
+  const updateCheck = useMemo(
+    () => (!checkForUpdates || !build ? null : desktop ? githubReleaseCheck() : deploymentCheck()),
+    [checkForUpdates, build, desktop],
+  );
+  useUpdateService(updateCheck, build);
+
+  const applyUpdate = useCallback(
+    (update: UpdateInfo) => {
+      if (update.kind === 'deployment') window.location.reload();
+      else if (update.url && desktop) desktop.openExternal(update.url);
+      else if (update.url) window.open(update.url, '_blank', 'noopener,noreferrer');
+    },
+    [desktop],
+  );
+
+  const announceUpdate = useCallback(
+    (update: UpdateInfo) =>
+      notifications.show({
+        id: 'update-available',
+        color: 'violet',
+        autoClose: 12_000,
+        title: `HttpReq ${update.version} is available`,
+        message: (
+          <Group gap="xs" mt={4}>
+            <Text size="sm">
+              {update.kind === 'deployment'
+                ? 'A newer version has been deployed.'
+                : `You are using ${version ?? 'an older version'}.`}
+            </Text>
+            <Button
+              size="compact-xs"
+              variant="light"
+              onClick={() => {
+                notifications.hide('update-available');
+                applyUpdate(update);
+              }}
+            >
+              {update.kind === 'deployment' ? 'Reload' : 'Download'}
+            </Button>
+          </Group>
+        ),
+      }),
+    [applyUpdate, version],
+  );
+
+  // A newly found update is announced once; after that the status bar keeps offering it.
+  const availableVersion = useUpdates((state) => state.update?.version);
+  const announced = useRef<string | null>(null);
+  useEffect(() => {
+    const update = useUpdates.getState().update;
+    if (!update || announced.current === update.version) return;
+    announced.current = update.version;
+    announceUpdate(update);
+  }, [availableVersion, announceUpdate]);
+
+  const checkUpdatesNow = useCallback(async () => {
+    try {
+      const update = await runUpdateCheck();
+      if (update) {
+        announced.current = update.version;
+        announceUpdate(update);
+      } else {
+        notifications.show({
+          color: 'teal',
+          message: `You are up to date: HttpReq ${version ?? ''} is the latest version.`,
+        });
+      }
+    } catch (error) {
+      notifications.show({
+        color: 'red',
+        title: 'Could not check for updates',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }, [announceUpdate, version]);
+
   const tabCount = tabs.length;
   const httpTabActive = activeKind === 'request';
   const commands = useMemo<CommandMap>(() => {
@@ -550,6 +659,24 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
       },
       'collection.new': { label: 'New Collection', run: () => void createCollection() },
       'file.import': { label: 'Import…', run: () => openImportDialog() },
+      'file.export': {
+        label: 'Export…',
+        // The open request's collection, or the request itself when it is not in one.
+        run: () => {
+          const state = useWorkbenchStore.getState();
+          const request = editableRequest(state, state.activeRequestId);
+          if (!request) return;
+          const collection = getAncestors(state.workspace, request.id).find(
+            (ancestor) => ancestor.kind === 'collection',
+          );
+          openExportDialog(
+            collection
+              ? { kind: 'collection', id: collection.node.id }
+              : { kind: 'request', request },
+          );
+        },
+        disabled: !httpTabActive,
+      },
       'request.save': {
         label: 'Save',
         shortcut: [{ key: 's', mod: true }],
@@ -645,6 +772,12 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
       'help.shortcuts': { label: 'Keyboard Shortcuts', run: () => setDialog('shortcuts') },
       'help.about': { label: 'About HttpReq', run: () => setDialog('about') },
     };
+    if (updateCheck) {
+      map['help.check-updates'] = {
+        label: 'Check for Updates…',
+        run: () => void checkUpdatesNow(),
+      };
+    }
     for (let position = 1; position <= 9; position += 1) {
       map[`request.goto-${position}`] = {
         label: `Go to Request ${position}`,
@@ -739,6 +872,8 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
     toggleStatusBar,
     toggleColorScheme,
     openDocumentation,
+    updateCheck,
+    checkUpdatesNow,
     tabCount,
     responsePosition,
     sidebarVisible,
@@ -977,6 +1112,7 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
                         runtimeLabel={desktop ? 'Desktop' : 'Browser'}
                         version={version}
                         sending={sending}
+                        onApplyUpdate={applyUpdate}
                       />
                     </AppShell.Footer>
                   )}
@@ -993,10 +1129,14 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
                     opened={dialog === 'about'}
                     onClose={() => setDialog(null)}
                     version={version}
+                    build={build}
                     desktop={desktop}
                     onOpenDocumentation={openDocumentation}
+                    onCheckForUpdates={updateCheck ? checkUpdatesNow : undefined}
+                    onApplyUpdate={applyUpdate}
                   />
                   <ImportDialog />
+                  <ExportDialog />
                   <ConfirmDialog />
                   <HostKeyDialog />
                 </AppShell>

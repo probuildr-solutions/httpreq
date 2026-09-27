@@ -32,7 +32,7 @@ import {
 } from 'react';
 import { collectSubtree, findNode, getAncestors, isLeafNode } from '@httpreq/workspace';
 import { confirmAction } from '../confirm';
-import { downloadJson, exportCollection, fileNameFor } from '../exchange';
+import { openExportDialog } from '../export/exportDialogStore';
 import { openImportDialog } from '../import/importDialogStore';
 import { isLeafRow, methodColor } from '../methods';
 import { useWorkbenchStore } from '../store';
@@ -293,10 +293,7 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
     selection.stop();
   };
 
-  const exportNode = (id: string) => {
-    const data = exportCollection(actions().workspace, id);
-    if (data) downloadJson(fileNameFor(data.collection.name, 'collection'), data);
-  };
+  const exportNode = (id: string) => openExportDialog({ kind: 'collection', id });
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).tagName === 'INPUT') return;

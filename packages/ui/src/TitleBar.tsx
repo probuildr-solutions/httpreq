@@ -122,6 +122,7 @@ export function TitleBar({
   const toggleSidebar = commands['view.toggle-sidebar'];
   const toggleTheme = commands['view.toggle-theme'];
   const settings = commands['tools.settings'];
+  const about = commands['help.about'];
 
   return (
     <div
@@ -140,10 +141,18 @@ export function TitleBar({
           className={classes.noDrag}
           aria-label={mobileNavOpened ? 'Close navigation' : 'Open navigation'}
         />
-        <div className={classes.brand}>
-          <AppLogo size={18} />
-          {(mac || !desktop) && <span className={classes.appName}>HttpReq</span>}
-        </div>
+        {/* The mark doubles as the way to the About dialog, so it is a real, focusable target. */}
+        <Tooltip label={about?.label ?? 'HttpReq'}>
+          <UnstyledButton
+            className={classes.brand}
+            aria-label={about?.label ?? 'HttpReq'}
+            onClick={about?.run}
+            disabled={!about}
+          >
+            <AppLogo size={20} />
+            {(mac || !desktop) && <span className={classes.appName}>HttpReq</span>}
+          </UnstyledButton>
+        </Tooltip>
         {!mac && (
           <MenuBar menus={menus} commands={commands} mac={mac} altKeyNavigation={!!desktop} />
         )}

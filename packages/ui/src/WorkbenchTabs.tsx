@@ -12,7 +12,7 @@ type Props = Omit<RequestTabsProps, 'requests' | 'unsavedIds'> & {
 
 /**
  * The tab strip plus its live decorations: a request's unsaved method and URL, the unsaved-changes
- * marker, and whether a WebSocket is connected.
+ * marker, and a WebSocket's connection status.
  *
  * Those change on every keystroke and on every socket event. Reading them here means such a change
  * re-renders a dozen tabs; reading them in the application shell (as it used to) re-rendered the
@@ -29,8 +29,8 @@ export function WorkbenchTabs({ tabs, ...props }: Props) {
     ),
   );
   const unsavedIds = useWorkbenchStore(useShallow((state) => Object.keys(state.drafts)));
-  const connected = useConnectionsStore(
-    useShallow((state) => ids.map((id) => state.sockets[id]?.status === 'connected')),
+  const socketStatus = useConnectionsStore(
+    useShallow((state) => ids.map((id) => state.sockets[id]?.status ?? 'disconnected')),
   );
 
   const unsaved = useMemo(() => new Set(unsavedIds), [unsavedIds]);
@@ -42,10 +42,10 @@ export function WorkbenchTabs({ tabs, ...props }: Props) {
           const url = drafted[index * 2 + 1];
           return method === undefined ? tab : { ...tab, method, url };
         }
-        if (tab.kind === 'websocket') return { ...tab, connected: connected[index] };
+        if (tab.kind === 'websocket') return { ...tab, status: socketStatus[index] };
         return tab;
       }),
-    [tabs, drafted, connected],
+    [tabs, drafted, socketStatus],
   );
 
   return <RequestTabs requests={decorated} unsavedIds={unsaved} {...props} />;

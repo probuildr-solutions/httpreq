@@ -105,11 +105,26 @@
   color: #fff;
 }
 
+/* The app mark: kept clear of the window edge and given a hit area of its own. */
 .brand {
   display: flex;
   align-items: center;
+  align-self: center;
   gap: 8px;
-  padding: 0 6px 0 2px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  color: inherit;
+  transition: background-color 120ms ease;
+}
+
+.brand:hover:not(:disabled) {
+  background: var(--hr-menu-hover-bg);
+}
+
+.brand:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
 }
 
 .appName {

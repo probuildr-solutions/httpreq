@@ -23,7 +23,8 @@
     "test:watch": "vitest",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "version:set": "npm version --workspaces --include-workspace-root --no-git-tag-version"
   },
   "devDependencies": {
     "@eslint/js": "^9.35.0",

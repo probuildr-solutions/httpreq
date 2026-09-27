@@ -78,7 +78,8 @@ export function SharingPanel({
           Export
         </Title>
         <Text size="xs" c="dimmed">
-          Saves a JSON file you can share or keep in version control. Literal secrets are removed.
+          Saves a file you can share or keep in version control: HttpReq, Postman Collection v2.1 or
+          OpenAPI 3.1. Literal secrets are removed.
         </Text>
         <Group gap="xs">
           <Button
@@ -87,7 +88,7 @@ export function SharingPanel({
             leftSection={<IconDownload size={14} />}
             onClick={onExportRequest}
           >
-            Export request
+            Export request…
           </Button>
           {onExportCollection && (
             <Button
@@ -96,7 +97,7 @@ export function SharingPanel({
               leftSection={<IconCopy size={14} />}
               onClick={onExportCollection}
             >
-              Export collection “{collectionName}”
+              Export collection “{collectionName}”…
             </Button>
           )}
         </Group>

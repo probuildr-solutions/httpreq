@@ -33,12 +33,14 @@ export function AppModal({
   footer,
   footerStart,
   withCloseButton = true,
+  // Centred in the window at any size, rather than hanging from the top edge (Mantine's default).
+  centered = true,
   ...props
 }: AppModalProps) {
   return (
     // Styled through `classNames` rather than `className` on the parts: Mantine also hands the
     // content's `className` to the positioning wrapper around it, which would break the layout.
-    <Modal.Root {...props} classNames={partClasses}>
+    <Modal.Root {...props} centered={centered} classNames={partClasses}>
       <Modal.Overlay />
       <Modal.Content>
         <Modal.Header>

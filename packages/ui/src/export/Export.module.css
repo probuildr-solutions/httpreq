@@ -1,0 +1,26 @@
+.card {
+  padding: 10px 12px;
+  border: 1px solid var(--mantine-color-default-border);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.card:hover {
+  background: var(--mantine-color-default-hover);
+}
+
+.card[data-checked] {
+  border-color: var(--mantine-primary-color-filled);
+  background: var(--mantine-primary-color-light);
+}
+
+.cardBody {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.cardBody > :first-child {
+  margin-top: 3px;
+}

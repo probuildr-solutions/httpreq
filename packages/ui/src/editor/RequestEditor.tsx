@@ -16,7 +16,7 @@ import {
 import { getAncestors, paramsFromUrl, urlWithParams } from '@httpreq/workspace';
 import { AuthorizationPanel } from '../auth/AuthorizationPanel';
 import { ScrollableTabsList } from '../ScrollableTabsList';
-import { downloadJson, exportCollection, exportRequest, fileNameFor } from '../exchange';
+import { openExportDialog } from '../export/exportDialogStore';
 import { usePreferences } from '../preferences';
 import { activeEnvironment, editableRequest, useWorkbenchStore, type EditorTab } from '../store';
 import { BodyPanel } from './BodyPanel';
@@ -315,15 +315,10 @@ export function RequestEditor({
         <Tabs.Panel value="sharing" className={classes.panel}>
           <SharingPanel
             buildCurl={() => buildCurl(request)}
-            onExportRequest={() =>
-              downloadJson(fileNameFor(request.name, 'request'), exportRequest(workspace, request))
-            }
+            onExportRequest={() => openExportDialog({ kind: 'request', request })}
             onExportCollection={
               collection
-                ? () => {
-                    const data = exportCollection(workspace, collection.id);
-                    if (data) downloadJson(fileNameFor(collection.name, 'collection'), data);
-                  }
+                ? () => openExportDialog({ kind: 'collection', id: collection.id })
                 : undefined
             }
             collectionName={collection?.name}

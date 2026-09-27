@@ -1,5 +1,6 @@
 import { Tooltip } from '@mantine/core';
 import {
+  IconArrowUpCircle,
   IconBolt,
   IconLayoutColumns,
   IconLayoutRows,
@@ -13,6 +14,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { activeConnectionCounts, useConnectionsStore } from './connections';
 import { recheckConnectivity, useConnectivity, type ConnectivityStatus } from './connectivity';
 import { usePreferences } from './preferences';
+import { useUpdates, type UpdateInfo } from './updates';
 import classes from './StatusBar.module.css';
 
 const statusText: Record<ConnectivityStatus, string> = {
@@ -32,6 +34,8 @@ interface Props {
   runtimeLabel: string;
   version?: string;
   sending: boolean;
+  /** Installs or loads an available update (download page, or a reload for the web app). */
+  onApplyUpdate?: (update: UpdateInfo) => void;
 }
 
 /** One live-connection counter. Hidden at zero, so the bar stays quiet when nothing is running. */
@@ -63,7 +67,9 @@ export const StatusBar = memo(function StatusBar({
   runtimeLabel,
   version,
   sending,
+  onApplyUpdate,
 }: Props) {
+  const update = useUpdates((state) => state.update);
   const status = useConnectivity((state) => state.status);
   // Shallow-compared: the selector derives a fresh object, so it needs a stable comparison.
   const counts = useConnectionsStore(useShallow(activeConnectionCounts));
@@ -134,6 +140,25 @@ export const StatusBar = memo(function StatusBar({
           )}
           Response {layout === 'right' ? 'Right' : 'Bottom'}
         </button>
+        {update && onApplyUpdate && (
+          <Tooltip
+            label={
+              update.kind === 'deployment'
+                ? 'A newer version has been deployed. Select to reload.'
+                : 'A newer version has been released. Select to open the download page.'
+            }
+            openDelay={300}
+          >
+            <button
+              type="button"
+              className={`${classes.item} ${classes.update}`}
+              onClick={() => onApplyUpdate(update)}
+            >
+              <IconArrowUpCircle size={13} aria-hidden />
+              Update to v{update.version}
+            </button>
+          </Tooltip>
+        )}
         {version && <span className={classes.text}>HttpReq v{version}</span>}
       </div>
     </div>

@@ -149,7 +149,18 @@
 }
 
 .details {
-  min-width: 200px;
+  min-width: 240px;
+}
+
+/* "Replace with": edits the variable in the active environment without leaving the request. */
+.editor {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+
+.editorInput {
+  font-family: var(--mantine-font-family-monospace);
 }
 
 .detailsValue {

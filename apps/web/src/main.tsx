@@ -37,7 +37,9 @@ createRoot(document.getElementById('root')!).render(
             history={history}
             desktop={bridge?.desktop}
             bridge={bridge}
-            version={__APP_VERSION__}
+            build={__APP_BUILD__}
+            // Development builds never look for updates: they are always "newer".
+            checkForUpdates={import.meta.env.PROD}
           />
         </HashRouter>
       </QueryClientProvider>

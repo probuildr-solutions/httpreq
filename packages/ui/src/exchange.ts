@@ -2,7 +2,6 @@ import { deserializeAuth } from '@httpreq/api-client';
 import { createId, WORKSPACE_VERSION, type HttpRequest, type Workspace } from '@httpreq/shared';
 import { sanitizeWorkspace } from '@httpreq/storage';
 import { collectSubtree, migrateWorkspace } from '@httpreq/workspace';
-import { stringifyPretty } from './indent';
 
 /**
  * Local, file-based sharing. Exports are sanitized exactly like storage (no literal secrets);
@@ -52,8 +51,9 @@ export const exportCollection = (workspace: Workspace, collectionId: string) => 
   };
 };
 
-export const downloadJson = (fileName: string, data: unknown) => {
-  const blob = new Blob([stringifyPretty(data)], { type: 'application/json' });
+/** Saves text as a file through the browser's (or Electron's) download handling. */
+export const downloadText = (fileName: string, text: string, type: string) => {
+  const blob = new Blob([text], { type });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -61,9 +61,6 @@ export const downloadJson = (fileName: string, data: unknown) => {
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 0);
 };
-
-export const fileNameFor = (name: string, suffix: string) =>
-  `${name.replace(/[^\w.-]+/g, '_').replace(/^_+|_+$/g, '') || 'export'}.${suffix}.json`;
 
 /** Gives every imported entity a new id, keeping the references between them. */
 const reassignIds = (imported: Workspace): Workspace => {
