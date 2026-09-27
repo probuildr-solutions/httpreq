@@ -57,10 +57,11 @@ interface Props {
   onSend: () => void;
   onCancel: () => void;
   onSave: () => void;
+  onSaveAs?: () => void;
   urlRef: Ref<HTMLInputElement>;
   /** Builds the cURL command for the request as currently edited. */
   buildCurl: (request: HttpRequest) => Promise<string>;
-  shortcuts: { send?: string; save?: string; focusUrl?: string };
+  shortcuts: { send?: string; save?: string; saveAs?: string; focusUrl?: string };
 }
 
 function Count({ value }: { value: number }) {
@@ -78,6 +79,7 @@ export function RequestEditor({
   onSend,
   onCancel,
   onSave,
+  onSaveAs,
   urlRef,
   buildCurl,
   shortcuts,
@@ -206,10 +208,12 @@ export function RequestEditor({
         onCancel={onCancel}
         saveState={saveState}
         onSave={onSave}
+        onSaveAs={onSaveAs}
         onCopyCurl={() => void copyCurl()}
         onDuplicate={() => duplicateNode(requestId)}
         sendShortcut={shortcuts.send}
         saveShortcut={shortcuts.save}
+        saveAsShortcut={shortcuts.saveAs}
         focusShortcut={shortcuts.focusUrl}
       />
 

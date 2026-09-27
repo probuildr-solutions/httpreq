@@ -3,6 +3,7 @@ import {
   IconAlertTriangle,
   IconCopy,
   IconDeviceFloppy,
+  IconCopyPlus,
   IconDots,
   IconSend,
   IconTerminal2,
@@ -26,10 +27,13 @@ interface Props {
   onCancel: () => void;
   saveState: SaveState;
   onSave: () => void;
+  /** Saves the request under a new name or in another collection or folder. */
+  onSaveAs?: () => void;
   onCopyCurl: () => void;
   onDuplicate: () => void;
   sendShortcut?: string;
   saveShortcut?: string;
+  saveAsShortcut?: string;
   focusShortcut?: string;
 }
 
@@ -56,10 +60,12 @@ export function UrlBar({
   onCancel,
   saveState,
   onSave,
+  onSaveAs,
   onCopyCurl,
   onDuplicate,
   sendShortcut,
   saveShortcut,
+  saveAsShortcut,
   focusShortcut,
 }: Props) {
   const saveTitle =
@@ -185,6 +191,15 @@ export function UrlBar({
           >
             {saveState === 'saved' ? 'Saved' : 'Save'}
           </Menu.Item>
+          {onSaveAs && (
+            <Menu.Item
+              leftSection={<IconCopyPlus size={15} />}
+              rightSection={saveAsShortcut}
+              onClick={onSaveAs}
+            >
+              Save as…
+            </Menu.Item>
+          )}
           <Menu.Item leftSection={<IconTerminal2 size={15} />} onClick={onCopyCurl}>
             Copy as cURL
           </Menu.Item>

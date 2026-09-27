@@ -117,6 +117,12 @@
 
 .sectionHeading[data-drop] {
   background: var(--mantine-primary-color-light);
+  box-shadow: inset 0 0 0 1px var(--mantine-primary-color-filled);
+  color: var(--mantine-primary-color-light-color);
+}
+
+.sectionHeading[data-drag='invalid'] {
+  opacity: 0.45;
 }
 
 .emptyTree {
@@ -155,9 +161,48 @@
   box-shadow: inset 0 0 0 1px var(--mantine-primary-color-filled);
 }
 
-.row[data-drop] {
+/*
+ * Drag and drop. "inside" outlines the container that receives the node; "before" and "after"
+ * draw an insertion line at the row's indentation, and the container the node would land in is
+ * tinted so the destination is always visible. Rows the node cannot go to are dimmed.
+ */
+.row[data-drop='inside'] {
   box-shadow: inset 0 0 0 1px var(--mantine-primary-color-filled);
   background: var(--mantine-primary-color-light);
+}
+
+.row[data-drop='before']::before,
+.row[data-drop='after']::before {
+  position: absolute;
+  z-index: 1;
+  right: 4px;
+  left: var(--row-indent, 6px);
+  height: 2px;
+  border-radius: 1px;
+  background: var(--mantine-primary-color-filled);
+  content: '';
+  pointer-events: none;
+}
+
+.row[data-drop='before']::before {
+  top: -1px;
+}
+
+.row[data-drop='after']::before {
+  bottom: -1px;
+}
+
+.row[data-drop-parent] {
+  background: var(--mantine-primary-color-light);
+}
+
+.row[data-drag='source'] {
+  opacity: 0.5;
+}
+
+.row[data-drag='invalid'] {
+  opacity: 0.4;
+  cursor: no-drop;
 }
 
 .row[aria-current='page'] .rowName {

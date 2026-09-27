@@ -166,6 +166,73 @@ export const moveNode = (
   });
 };
 
+/** Where a dragged node lands relative to the row it is dropped on. */
+export type DropPosition = 'before' | 'after' | 'inside';
+
+/** The explorer lists folders, then HTTP requests, then WebSocket requests within a container. */
+const KIND_RANK: Record<TreeNode['kind'], number> = {
+  collection: 0,
+  folder: 0,
+  request: 1,
+  websocket: 2,
+};
+
+const siblingsOf = (workspace: Workspace, node: TreeNode, parentId: string | null) => {
+  switch (node.kind) {
+    case 'collection':
+      return workspace.collections;
+    case 'folder':
+      return parentId ? childFolders(workspace, parentId) : [];
+    case 'request':
+      return childRequests(workspace, parentId);
+    case 'websocket':
+      return childWebSockets(workspace, parentId);
+  }
+};
+
+/**
+ * Resolves a drop of `id` onto `targetId` (`null` is the Drafts list) into the arguments of
+ * {@link moveNode}, or `null` when the drop is not allowed: a collection anywhere but among
+ * collections, a folder into its own subtree or out of every collection, or anything onto a
+ * missing node. Dropping between nodes of another kind places the node where its own kind is
+ * listed, as close to that spot as the explorer's ordering allows.
+ */
+export const resolveDrop = (
+  workspace: Workspace,
+  id: string,
+  targetId: string | null,
+  position: DropPosition,
+): { parentId: string | null; beforeId: string | null } | null => {
+  const node = findNode(workspace, id);
+  if (!node) return null;
+  if (targetId === null) return isLeafNode(node) ? { parentId: null, beforeId: null } : null;
+  if (targetId === id) return null;
+  const target = findNode(workspace, targetId);
+  if (!target) return null;
+
+  if (node.kind === 'collection') {
+    if (target.kind !== 'collection' || position === 'inside') return null;
+  } else if (target.kind === 'collection' && position !== 'inside') {
+    // Nothing but a collection sits beside a collection.
+    return null;
+  }
+  if (position === 'inside' && isLeafNode(target)) return null;
+
+  const parentId = position === 'inside' ? targetId : parentIdOf(target);
+  if (node.kind === 'folder') {
+    if (!parentId || parentId === id || isAncestorOf(workspace, id, parentId)) return null;
+  }
+  if (position === 'inside') return { parentId, beforeId: null };
+
+  const siblings = siblingsOf(workspace, node, parentId).filter((item) => item.id !== id);
+  const rank = KIND_RANK[node.kind] - KIND_RANK[target.kind];
+  if (rank < 0) return { parentId, beforeId: null };
+  if (rank > 0) return { parentId, beforeId: siblings[0]?.id ?? null };
+  if (position === 'before') return { parentId, beforeId: targetId };
+  const index = siblings.findIndex((item) => item.id === targetId);
+  return { parentId, beforeId: siblings[index + 1]?.id ?? null };
+};
+
 const copyName = (name: string) => `${name} (copy)`;
 
 const rekey = <T extends { id: string }>(items: T[]) =>
@@ -265,6 +332,34 @@ export const duplicateNode = (
       websocketRequests: [...workspace.websocketRequests, ...sockets],
     }),
     id: root.id,
+  };
+};
+
+export type LeafCopySource =
+  { kind: 'request'; request: HttpRequest } | { kind: 'websocket'; request: WebSocketRequest };
+
+/**
+ * Adds a copy of a request, as given (for "Save as", that is with its unsaved edits), to the end
+ * of `parentId` under `name`. The source request is left as it was. Returns the copy's id.
+ */
+export const insertLeafCopy = (
+  workspace: Workspace,
+  source: LeafCopySource,
+  parentId: string | null,
+  name: string,
+): { workspace: Workspace; id: string } => {
+  const trimmed = name.trim() || source.request.name;
+  if (source.kind === 'request') {
+    const copy = { ...cloneRequest(source.request, parentId), name: trimmed };
+    return {
+      workspace: touch(workspace, { requests: [...workspace.requests, copy] }),
+      id: copy.id,
+    };
+  }
+  const copy = { ...cloneWebSocket(source.request, parentId), name: trimmed };
+  return {
+    workspace: touch(workspace, { websocketRequests: [...workspace.websocketRequests, copy] }),
+    id: copy.id,
   };
 };
 
