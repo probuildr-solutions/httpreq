@@ -122,9 +122,19 @@ jobs:
         run: npm ci
 
       - name: Build and package
-        run: npm run package:desktop
+        # Bash on every OS so the unset loop below works on Windows too.
+        shell: bash
+        # electron-builder treats a defined but empty CSC_LINK as a certificate path, resolves it
+        # to the project directory and fails with "not a file". Unset the empty ones so a missing
+        # secret builds an unsigned package instead.
+        run: |
+          for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD CSC_LINK CSC_KEY_PASSWORD \
+            APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then unset "$name"; fi
+          done
+          npm run package:desktop
         env:
-          # Each platform only sees its own certificate; empty values build unsigned packages.
+          # Each platform only sees its own certificate; empty values are unset above.
           WIN_CSC_LINK: ${{ matrix.platform == 'win' && secrets.WIN_CSC_LINK || '' }}
           WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
           CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
