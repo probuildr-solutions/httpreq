@@ -136,18 +136,43 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build and package
-        run: npm run package:desktop
+      # Signing variables are exported only when their secret is set. electron-builder treats a
+      # variable that is set but empty as a value: an empty CSC_LINK is resolved as a certificate
+      # path, the current directory, and fails with "apps/desktop not a file". Without the
+      # secrets the packages are simply unsigned.
+      - name: Configure code signing
+        shell: bash
         env:
-          # Each platform only sees its own certificate; empty values build unsigned packages.
+          # Each platform only sees its own certificate.
           WIN_CSC_LINK: ${{ matrix.platform == 'win' && secrets.WIN_CSC_LINK || '' }}
           WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
           CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK != '' }}
           APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+        run: |
+          signing=()
+          for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD CSC_LINK CSC_KEY_PASSWORD \
+            APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            [ -n "${!name}" ] || continue
+            # Delimited, so a certificate pasted with line breaks survives intact.
+            delimiter="EOF_$(openssl rand -hex 8)"
+            printf '%s<<%s\n%s\n%s\n' "$name" "$delimiter" "${!name}" "$delimiter" >> "$GITHUB_ENV"
+            signing+=("$name")
+          done
+          if [ "${{ matrix.platform }}" = mac ] && [ -z "$CSC_LINK" ]; then
+            # No certificate: do not let electron-builder look for a signing identity either.
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+          fi
+          if [ ${#signing[@]} -eq 0 ]; then
+            echo "No signing secrets for ${{ matrix.name }}: building unsigned packages."
+          else
+            echo "Signing with: ${signing[*]}"
+          fi
+
+      - name: Build and package
+        run: npm run package:desktop
 
       - name: Verify packages
         run: node apps/desktop/scripts/verify-packages.mjs ${{ matrix.platform }}
