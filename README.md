@@ -58,13 +58,27 @@ npm run build
 npm run start --workspace=@httpreq/desktop
 ```
 
-To create installers with electron-builder (NSIS on Windows, DMG/ZIP on macOS, AppImage/deb on Linux; build on the target OS), run:
+To create installers with electron-builder (NSIS `.exe` on Windows, `.dmg`/`.zip` for Intel and Apple silicon on macOS, `.AppImage`/`.deb` on Linux; build on the target OS), run:
 
 ```bash
 npm run package:desktop
 ```
 
 Output goes to `apps/desktop/release/`. The app icon master is `apps/desktop/build/icon.svg`; after editing it, regenerate the `.ico`, `.icns`, Linux PNG set, runtime window icon and web favicon with `npm run icons --workspace=@httpreq/desktop`.
+
+### Automated builds and releases
+
+The [Desktop packages](.github/workflows/desktop-packages.yml) workflow builds the Windows, macOS and Linux installers every time a pull request is merged into `main` (it can also be started by hand from the Actions tab). It checks each platform's packages carry the right version, then attaches them to the run as artifacts named `HttpReq-<version>-<win|mac|linux>`, each with a `SHA256SUMS` file. Download them from the **Artifacts** section of the finished run.
+
+A merge becomes a GitHub Release, tagged `v<version>` with every installer attached, when the pull request changes the version or has the `release` label. To cut a release, bump the version in a pull request:
+
+```bash
+npm run version:set -- 0.2.0
+```
+
+A version with a hyphen (`0.2.0-beta.1`) is published as a pre-release, which the desktop app's update check ignores. The release is only created once every platform has built. If any platform fails, or the tag already exists, nothing is published. `npm run release:check` runs the same version checks locally.
+
+Packages are unsigned unless these repository secrets are set: `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` (a base64 `.pfx` Authenticode certificate); `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD` (a base64 Developer ID Application `.p12`); and `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization.
 
 ## Workspaces
 
