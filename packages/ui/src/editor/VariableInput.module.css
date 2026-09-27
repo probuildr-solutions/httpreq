@@ -52,10 +52,20 @@
   overflow: hidden;
 }
 
-/* The mirror and the input must share every metric that affects glyph positions. */
+/*
+ * The mirror and the input must share every metric that affects glyph positions.
+ *
+ * Ligatures are off: the monospace stack starts with coding fonts (JetBrains Mono, Cascadia Code)
+ * whose contextual ligatures redraw `//`, `://`, `=>` and the like as joined glyphs, so a typed
+ * `https://` could look as if a slash was missing, and the caret no longer matched the characters.
+ */
 .mirror,
 .input {
   font: inherit;
+  font-variant-ligatures: none;
+  font-feature-settings:
+    'liga' 0,
+    'calt' 0;
   letter-spacing: normal;
   padding: 0 var(--vi-padding);
   line-height: calc(var(--vi-height) - 2px);

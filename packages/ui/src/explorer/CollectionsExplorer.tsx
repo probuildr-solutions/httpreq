@@ -1,5 +1,6 @@
 import { ActionIcon, CloseButton, Menu, Text, TextInput, Tooltip } from '@mantine/core';
 import {
+  IconArrowsMove,
   IconBolt,
   IconBox,
   IconChevronRight,
@@ -26,24 +27,41 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type DragEvent,
   type KeyboardEvent,
   type MouseEvent,
 } from 'react';
-import { collectSubtree, findNode, getAncestors, isLeafNode } from '@httpreq/workspace';
+import {
+  collectSubtree,
+  findNode,
+  getAncestors,
+  isLeafNode,
+  resolveDrop,
+  type DropPosition,
+} from '@httpreq/workspace';
 import { confirmAction } from '../confirm';
 import { openExportDialog } from '../export/exportDialogStore';
 import { openImportDialog } from '../import/importDialogStore';
 import { isLeafRow, methodColor } from '../methods';
 import { useWorkbenchStore } from '../store';
 import { buildRows, type TreeRow } from './rows';
+import { openSaveAsDialog } from './saveAsDialogStore';
+import {
+  draggedTreeNode,
+  endTreeDrag,
+  startTreeDrag,
+  TREE_DRAG_TYPE,
+  useTreeDrag,
+} from './treeDrag';
 import { PanelHeader } from './PanelHeader';
 import { BulkDeleteButton, RowCheckbox, SelectionBar, SelectModeButton } from './Selection';
 import { useSelection } from './useSelection';
 import classes from './Sidebar.module.css';
 
-const DRAG_TYPE = 'application/x-httpreq-node';
 const INDENT = 12;
+/** Hovering a collapsed container this long while dragging opens it. */
+const EXPAND_DELAY = 600;
 
 interface Props {
   onOpenSettings: (id: string) => void;
@@ -77,6 +95,7 @@ interface RowHandlers {
   newWebSocket: (id: string) => void;
   newFolder: (id: string) => void;
   duplicate: (id: string) => void;
+  moveTo: (id: string) => void;
   remove: (id: string) => void;
   settings: (id: string) => void;
   exportNode: (id: string) => void;
@@ -100,6 +119,40 @@ const ROW_FIELDS: readonly (keyof TreeRow)[] = [
 ];
 const sameRow = (a: TreeRow, b: TreeRow) => ROW_FIELDS.every((field) => a[field] === b[field]);
 
+/** A drag target: a tree row, or the Drafts heading (requests in no collection). */
+type DropTarget = TreeRow | 'drafts';
+
+interface DropState {
+  /** Row id, or `drafts`. */
+  key: string;
+  position: DropPosition;
+  /** The container the node would land in, which is highlighted too. */
+  parentId: string | null;
+  /** The node would become a draft (in no collection). */
+  toDrafts: boolean;
+}
+
+/**
+ * Which part of a row the pointer is over. Collections only reorder among themselves, and nothing
+ * else sits beside a collection. A folder's top and bottom quarters drop beside it and its middle
+ * drops into it; below an open folder is its first child, so there the bottom drops into it too.
+ */
+const dropPosition = (
+  target: DropTarget,
+  sourceKind: TreeRow['kind'],
+  event: DragEvent,
+): DropPosition => {
+  if (target === 'drafts') return 'inside';
+  const rect = event.currentTarget.getBoundingClientRect();
+  const y = rect.height ? (event.clientY - rect.top) / rect.height : 0.5;
+  if (sourceKind === 'collection') return y < 0.5 ? 'before' : 'after';
+  if (target.kind === 'collection') return 'inside';
+  if (isLeafRow(target.kind)) return y < 0.5 ? 'before' : 'after';
+  if (y < 0.25) return 'before';
+  if (y > 0.75 && !(target.expanded && target.hasChildren)) return 'after';
+  return 'inside';
+};
+
 export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
   const workspace = useWorkbenchStore((state) => state.workspace);
   // Only which requests have drafts matters here, not what is in them: typing must not re-render
@@ -114,9 +167,10 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
 
   const [filter, setFilter] = useState('');
   const [focusedId, setFocusedId] = useState<string | null>(null);
-  const [drop, setDrop] = useState<string | null>(null);
+  const [drop, setDrop] = useState<DropState | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
-  const dragged = useRef<string | null>(null);
+  const draggingId = useTreeDrag((state) => state.id);
+  const expandTimer = useRef<{ id: string; timer: ReturnType<typeof setTimeout> } | null>(null);
   const treeRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ top: 0, height: 800 });
 
@@ -352,39 +406,127 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
     }
   };
 
-  /* Drag and drop: onto a container moves inside it; onto a request moves next to it. */
-  const canDrop = (target: TreeRow | 'drafts') => {
-    const source = dragged.current;
-    if (!source) return false;
-    const current = actions().workspace;
-    const node = findNode(current, source);
-    if (!node) return false;
-    if (target === 'drafts') return isLeafNode(node);
-    if (target.id === source) return false;
-    if (node.kind === 'collection') return target.kind === 'collection';
-    if (node.kind === 'folder') {
-      const destination = isLeafRow(target.kind) ? target.parentId : target.id;
-      return !!destination && !collectSubtree(current, source).containers.has(destination);
-    }
-    return true;
+  /* ---------- Drag and drop ---------- */
+
+  /** Opens a collapsed container that is hovered long enough during a drag; `null` disarms. */
+  const armExpand = (id: string | null) => {
+    if ((expandTimer.current?.id ?? null) === id) return;
+    if (expandTimer.current) clearTimeout(expandTimer.current.timer);
+    expandTimer.current = id
+      ? {
+          id,
+          timer: setTimeout(() => {
+            expandTimer.current = null;
+            actions().toggleExpanded(id, true);
+          }, EXPAND_DELAY),
+        }
+      : null;
   };
 
-  const onDrop = (target: TreeRow | 'drafts') => {
-    const source = dragged.current;
-    dragged.current = null;
-    setDrop(null);
-    if (!source || !canDrop(target)) return;
-    const node = findNode(actions().workspace, source)!;
-    if (target === 'drafts') actions().moveNode(source, null);
-    else if (node.kind === 'collection') actions().moveNode(source, null, target.id);
-    else if (isLeafRow(target.kind)) actions().moveNode(source, target.parentId, target.id);
-    else actions().moveNode(source, target.id);
+  /** Where the dragged node would go if dropped on `target` now, or null if it cannot. */
+  const resolveTarget = (target: DropTarget, event: DragEvent) => {
+    const source = draggedTreeNode();
+    if (!source) return null;
+    const current = actions().workspace;
+    const node = findNode(current, source);
+    if (!node) return null;
+    const position = dropPosition(target, node.kind, event);
+    const resolved = resolveDrop(current, source, target === 'drafts' ? null : target.id, position);
+    return resolved && { source, position, kind: node.kind, ...resolved };
   };
+
+  const onDragOver = (target: DropTarget, key: string, event: DragEvent) => {
+    // Only tree nodes are dropped here; files and text dragged in from elsewhere are ignored.
+    if (!draggedTreeNode()) return;
+    const resolved = resolveTarget(target, event);
+    if (!resolved) {
+      // Not calling preventDefault() is what shows the "no drop" cursor.
+      event.dataTransfer.dropEffect = 'none';
+      armExpand(null);
+      setDrop((current) => (current?.key === key ? null : current));
+      return;
+    }
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    const { position, parentId } = resolved;
+    const toDrafts = resolved.kind !== 'collection' && parentId === null;
+    armExpand(
+      target !== 'drafts' && position === 'inside' && !target.expanded && target.hasChildren
+        ? target.id
+        : null,
+    );
+    setDrop((current) =>
+      current?.key === key && current.position === position && current.parentId === parentId
+        ? current
+        : { key, position, parentId, toDrafts },
+    );
+  };
+
+  const endDrag = () => {
+    armExpand(null);
+    setDrop(null);
+    endTreeDrag();
+  };
+
+  const onDrop = (target: DropTarget, event: DragEvent) => {
+    const resolved = resolveTarget(target, event);
+    endDrag();
+    if (resolved) actions().moveNode(resolved.source, resolved.parentId, resolved.beforeId);
+  };
+
+  // A drag that ends anywhere else (on the tab strip, or cancelled) clears the indicators too.
+  useEffect(() => {
+    if (draggingId) return;
+    setDrop(null);
+    if (expandTimer.current) clearTimeout(expandTimer.current.timer);
+    expandTimer.current = null;
+  }, [draggingId]);
+
+  /**
+   * While dragging, rows the node can never go to are dimmed: anything but a collection for a
+   * collection; for a folder, its own subtree and the Drafts list.
+   */
+  const dragBlocked = useMemo(() => {
+    if (!draggingId) return null;
+    const node = findNode(workspace, draggingId);
+    if (!node) return null;
+    if (node.kind === 'collection') {
+      return { drafts: true, row: (row: TreeRow) => row.kind !== 'collection' };
+    }
+    if (node.kind === 'folder') {
+      const subtree = collectSubtree(workspace, draggingId);
+      const inside = new Set([...subtree.containers, ...subtree.requests, ...subtree.websockets]);
+      return {
+        drafts: true,
+        row: (row: TreeRow) =>
+          inside.has(row.id) || (row.parentId === null && row.kind !== 'collection'),
+      };
+    }
+    return { drafts: false, row: () => false };
+  }, [draggingId, workspace]);
 
   // Created once; each handler calls through to the closures of the latest render, so the object
   // stays stable without going stale.
-  const latest = useRef({ open, remove, exportNode, canDrop, onDrop, onOpenSettings, selection });
-  latest.current = { open, remove, exportNode, canDrop, onDrop, onOpenSettings, selection };
+  const latest = useRef({
+    open,
+    remove,
+    exportNode,
+    onDragOver,
+    onDrop,
+    endDrag,
+    onOpenSettings,
+    selection,
+  });
+  latest.current = {
+    open,
+    remove,
+    exportNode,
+    onDragOver,
+    onDrop,
+    endDrag,
+    onOpenSettings,
+    selection,
+  };
   const handlers = useMemo<RowHandlers>(
     () => ({
       open: (row) => latest.current.open(row),
@@ -399,31 +541,24 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
       newWebSocket: (id) => actions().createWebSocketRequest(id),
       newFolder: (id) => actions().createFolder(id),
       duplicate: (id) => actions().duplicateNode(id),
+      moveTo: (id) => openSaveAsDialog({ mode: 'move', id }),
       remove: (id) => void latest.current.remove(id),
       settings: (id) => latest.current.onOpenSettings(id),
       exportNode: (id) => latest.current.exportNode(id),
       dragStart: (row, event) => {
-        dragged.current = row.id;
         event.dataTransfer.effectAllowed = 'move';
-        event.dataTransfer.setData(DRAG_TYPE, row.id);
+        event.dataTransfer.setData(TREE_DRAG_TYPE, row.id);
+        startTreeDrag(row.id);
       },
-      dragEnd: () => {
-        dragged.current = null;
-        setDrop(null);
-      },
-      dragOver: (target, key, event) => {
-        if (!latest.current.canDrop(target)) return;
-        event.preventDefault();
-        event.dataTransfer.dropEffect = 'move';
-        setDrop((current) => (current === key ? current : key));
-      },
+      dragEnd: () => latest.current.endDrag(),
+      dragOver: (target, key, event) => latest.current.onDragOver(target, key, event),
       dragLeave: (key, event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node))
-          setDrop((current) => (current === key ? null : current));
+          setDrop((current) => (current?.key === key ? null : current));
       },
       drop: (target, event) => {
         event.preventDefault();
-        latest.current.onDrop(target);
+        latest.current.onDrop(target, event);
       },
     }),
     [actions],
@@ -439,7 +574,9 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
       unsaved={unsaved.has(row.id)}
       renaming={row.id === renamingId}
       anyRenaming={renamingId !== null}
-      dropTarget={drop === row.id}
+      dropPosition={drop?.key === row.id ? drop.position : undefined}
+      dropParent={!!drop && drop.position !== 'inside' && drop.parentId === row.id}
+      dragState={draggingId === row.id ? 'source' : dragBlocked?.row(row) ? 'invalid' : undefined}
       menuOpen={menuFor === row.id}
       selecting={selection.selecting}
       checked={selection.selecting && selection.isSelected(row.id)}
@@ -582,7 +719,8 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
 
         <div
           className={classes.sectionHeading}
-          data-drop={drop === 'drafts' || undefined}
+          data-drop={drop?.toDrafts ? '' : undefined}
+          data-drag={dragBlocked?.drafts ? 'invalid' : undefined}
           onDragOver={(event) => handlers.dragOver('drafts', 'drafts', event)}
           onDragLeave={(event) => handlers.dragLeave('drafts', event)}
           onDrop={(event) => handlers.drop('drafts', event)}
@@ -615,7 +753,11 @@ interface RowProps {
   renaming: boolean;
   /** Whether any row (this one or, after "New folder", a new one) is being renamed. */
   anyRenaming: boolean;
-  dropTarget: boolean;
+  /** Set while a dragged node is over this row: where it would be dropped. */
+  dropPosition?: DropPosition;
+  /** The dragged node would land in this container (dropped beside one of its children). */
+  dropParent: boolean;
+  dragState?: 'source' | 'invalid';
   menuOpen: boolean;
   /** Selection mode: rows show a checkbox and a click checks them instead of opening them. */
   selecting: boolean;
@@ -631,7 +773,9 @@ const ExplorerRow = memo(function ExplorerRow({
   unsaved,
   renaming,
   anyRenaming,
-  dropTarget,
+  dropPosition,
+  dropParent,
+  dragState,
   menuOpen,
   selecting,
   checked,
@@ -661,8 +805,15 @@ const ExplorerRow = memo(function ExplorerRow({
       tabIndex={tabbable ? 0 : -1}
       className={classes.row}
       data-selected={(selecting ? checked : selected) || undefined}
-      data-drop={dropTarget || undefined}
-      style={{ paddingLeft: 6 + row.depth * INDENT }}
+      data-drop={dropPosition}
+      data-drop-parent={dropParent || undefined}
+      data-drag={dragState}
+      style={
+        {
+          paddingLeft: 6 + row.depth * INDENT,
+          '--row-indent': `${6 + row.depth * INDENT}px`,
+        } as CSSProperties
+      }
       onClick={() => (selecting ? handlers.check(row.id) : handlers.open(row))}
       onFocus={(event) => event.target === event.currentTarget && handlers.focus(row.id)}
       onContextMenu={selecting ? undefined : onContextMenu}
@@ -824,6 +975,14 @@ const ExplorerRow = memo(function ExplorerRow({
             >
               Duplicate
             </Menu.Item>
+            {row.kind !== 'collection' && (
+              <Menu.Item
+                leftSection={<IconArrowsMove size={14} />}
+                onClick={() => handlers.moveTo(row.id)}
+              >
+                Move to…
+              </Menu.Item>
+            )}
             {row.kind === 'collection' && (
               <Menu.Item
                 leftSection={<IconDownload size={14} />}

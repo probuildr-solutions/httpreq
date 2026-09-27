@@ -51,6 +51,7 @@ export const buildMacMenu = ({ command, openExternal }: MacMenuHandlers) => {
         item('Export…', 'file.export'),
         { type: 'separator' },
         item('Save', 'request.save', 'Cmd+S'),
+        item('Save As…', 'request.save-as', 'Cmd+Shift+S'),
         { type: 'separator' },
         item('Close Request', 'request.close', 'Cmd+W'),
       ],

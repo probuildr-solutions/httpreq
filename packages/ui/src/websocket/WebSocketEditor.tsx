@@ -1,6 +1,8 @@
 import {
+  ActionIcon,
   Alert,
   Button,
+  Menu,
   NumberInput,
   SegmentedControl,
   Stack,
@@ -13,6 +15,10 @@ import {
 } from '@mantine/core';
 import {
   IconAlertTriangle,
+  IconCopy,
+  IconCopyPlus,
+  IconDeviceFloppy,
+  IconDots,
   IconPlugConnected,
   IconPlugConnectedX,
   IconRefresh,
@@ -20,7 +26,7 @@ import {
 } from '@tabler/icons-react';
 import { useCallback, useMemo, useState } from 'react';
 import { resolveInheritedAuth } from '@httpreq/api-client';
-import { paramsFromUrl, urlWithParams } from '@httpreq/workspace';
+import { getAncestors, paramsFromUrl, urlWithParams } from '@httpreq/workspace';
 import {
   WEBSOCKET_PAYLOAD_TYPES,
   type AuthConfig,
@@ -32,6 +38,7 @@ import {
 import { AuthorizationPanel } from '../auth/AuthorizationPanel';
 import { useCapabilities } from '../capabilities';
 import { emptySocket, useConnectionsStore } from '../connections';
+import { Breadcrumb } from '../editor/Breadcrumb';
 import { CodeEditor } from '../editor/CodeEditor';
 import { KeyValueTable } from '../editor/KeyValueTable';
 import { VariableInput } from '../editor/VariableInput';
@@ -67,6 +74,11 @@ const PLACEHOLDER: Record<WebSocketPayloadType, string> = {
 
 interface Props {
   requestId: string;
+  /** Files a request that is in no collection yet (via Save as); otherwise writes it to disk. */
+  onSave?: () => void;
+  /** Saves under a new name or in another collection or folder. */
+  onSaveAs?: () => void;
+  shortcuts?: { save?: string; saveAs?: string };
 }
 
 /**
@@ -74,17 +86,22 @@ interface Props {
  * HTTP request, a message composer and the message log.
  *
  * Unlike HTTP requests, edits here are committed to the workspace immediately (as environments
- * are), so a socket request has no unsaved state to lose when its tab closes.
+ * are), so a socket request has no unsaved state to lose when its tab closes. Saving is about
+ * where it lives: Save files a draft socket into a collection, Save as copies it elsewhere.
  */
-export function WebSocketEditor({ requestId }: Props) {
+export function WebSocketEditor({ requestId, onSave, onSaveAs, shortcuts = {} }: Props) {
   const workspace = useWorkbenchStore((state) => state.workspace);
   const edit = useWorkbenchStore((state) => state.editWebSocketRequest);
+  const renameNode = useWorkbenchStore((state) => state.renameNode);
+  const revealNode = useWorkbenchStore((state) => state.revealNode);
+  const duplicateNode = useWorkbenchStore((state) => state.duplicateNode);
   const request = workspace.websocketRequests.find((item) => item.id === requestId);
   const socket = useConnectionsStore((state) => state.sockets[requestId]) ?? emptySocket();
   const api = useWebSocketApi();
   const capabilities = useCapabilities();
   const [tab, setTab] = useState<string | null>('params');
 
+  const path = useMemo(() => getAncestors(workspace, requestId), [workspace, requestId]);
   const inherited = useMemo(
     () => resolveInheritedAuth(workspace, request?.parentId ?? null),
     [workspace, request?.parentId],
@@ -106,6 +123,11 @@ export function WebSocketEditor({ requestId }: Props) {
     patch({ params, url: urlWithParams(request.url, params) });
 
   const send = () => api.send(request, request.draftPayloadType, request.draftMessage);
+  // Edits are committed as they are made, so a socket in a collection is always saved.
+  const filed = request.parentId !== null;
+  const saveTitle = filed
+    ? 'Saved — WebSocket changes are saved as you make them'
+    : `Save to a collection${shortcuts.save ? ` (${shortcuts.save})` : ''}`;
 
   return (
     <WorkbenchSplit
@@ -115,6 +137,12 @@ export function WebSocketEditor({ requestId }: Props) {
       busy={busy}
       request={
         <div className={classes.panel}>
+          <Breadcrumb
+            path={path}
+            name={request.name}
+            onSelect={revealNode}
+            onRename={(name) => renameNode(requestId, name)}
+          />
           <div className={classes.urlBar}>
             <Text size="xs" fw={700} c="violet" aria-hidden>
               WS
@@ -167,6 +195,44 @@ export function WebSocketEditor({ requestId }: Props) {
                 <IconRefresh size={15} />
               </Button>
             </Tooltip>
+            {onSave && (
+              <Tooltip label={saveTitle}>
+                <Button
+                  variant="default"
+                  size="xs"
+                  leftSection={<IconDeviceFloppy size={15} />}
+                  data-state={filed ? 'saved' : 'modified'}
+                  aria-keyshortcuts={shortcuts.save}
+                  onClick={onSave}
+                >
+                  {filed ? 'Saved' : 'Save'}
+                </Button>
+              </Tooltip>
+            )}
+            <Menu position="bottom-end" withinPortal shadow="md" width={220}>
+              <Menu.Target>
+                <ActionIcon variant="default" size={30} aria-label="More WebSocket actions">
+                  <IconDots size={16} />
+                </ActionIcon>
+              </Menu.Target>
+              <Menu.Dropdown>
+                {onSaveAs && (
+                  <Menu.Item
+                    leftSection={<IconCopyPlus size={15} />}
+                    rightSection={shortcuts.saveAs}
+                    onClick={onSaveAs}
+                  >
+                    Save as…
+                  </Menu.Item>
+                )}
+                <Menu.Item
+                  leftSection={<IconCopy size={15} />}
+                  onClick={() => duplicateNode(requestId)}
+                >
+                  Duplicate request
+                </Menu.Item>
+              </Menu.Dropdown>
+            </Menu>
           </div>
 
           {socket.error && (

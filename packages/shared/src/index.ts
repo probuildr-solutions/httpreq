@@ -155,6 +155,7 @@ export const MENU_COMMANDS = [
   'file.export',
   'request.close',
   'request.save',
+  'request.save-as',
   'request.send',
   'request.duplicate',
   'request.focus-url',

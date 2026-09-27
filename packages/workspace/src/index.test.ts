@@ -4,6 +4,7 @@ import {
   createEmptyRequest,
   createFolder,
   createKeyValue,
+  createWebSocketRequest,
   WORKSPACE_VERSION,
   type Workspace,
 } from '@httpreq/shared';
@@ -11,11 +12,14 @@ import {
   createDefaultWorkspace,
   deleteNode,
   duplicateNode,
+  collectSubtree,
   getAncestors,
+  insertLeafCopy,
   migrateWorkspace,
   moveNode,
   paramsFromUrl,
   renameNode,
+  resolveDrop,
   urlWithParams,
 } from './index';
 
@@ -87,6 +91,124 @@ describe('tree operations', () => {
     expect(moved.folders.find((folder) => folder.id === auth.id)!.parentId).toBe(
       workspace.collections[0]!.id,
     );
+  });
+
+  it('moves a folder with everything inside it to another collection', () => {
+    const { workspace, v1, auth, request } = sample();
+    const other = createCollection('Other');
+    const socket = { ...createWebSocketRequest(auth.id), name: 'feed' };
+    const start = {
+      ...workspace,
+      collections: [...workspace.collections, other],
+      websocketRequests: [socket],
+    };
+    const moved = moveNode(start, v1.id, other.id);
+    const subtree = collectSubtree(moved, other.id);
+    expect(subtree.containers).toEqual(new Set([other.id, v1.id, auth.id]));
+    expect(subtree.requests).toEqual(new Set([request.id]));
+    expect(subtree.websockets).toEqual(new Set([socket.id]));
+    // Contents keep their data and their place in the hierarchy.
+    expect(moved.requests[0]).toEqual(request);
+    expect(moved.folders.find((folder) => folder.id === auth.id)!.parentId).toBe(v1.id);
+  });
+
+  describe('resolveDrop', () => {
+    const tree = () => {
+      const base = sample();
+      const other = createCollection('Other');
+      const a = { ...createEmptyRequest(base.v1.id), name: 'a' };
+      const b = { ...createEmptyRequest(base.v1.id), name: 'b' };
+      const draft = createEmptyRequest(null);
+      const socket = createWebSocketRequest(base.v1.id);
+      const workspace: Workspace = {
+        ...base.workspace,
+        collections: [...base.workspace.collections, other],
+        requests: [...base.workspace.requests, a, b, draft],
+        websocketRequests: [socket],
+      };
+      return { ...base, workspace, other, a, b, draft, socket };
+    };
+
+    it('drops into containers and next to siblings', () => {
+      const { workspace, v1, auth, a, b, request } = tree();
+      expect(resolveDrop(workspace, request.id, v1.id, 'inside')).toEqual({
+        parentId: v1.id,
+        beforeId: null,
+      });
+      expect(resolveDrop(workspace, request.id, a.id, 'before')).toEqual({
+        parentId: v1.id,
+        beforeId: a.id,
+      });
+      expect(resolveDrop(workspace, request.id, a.id, 'after')).toEqual({
+        parentId: v1.id,
+        beforeId: b.id,
+      });
+      expect(resolveDrop(workspace, request.id, b.id, 'after')).toEqual({
+        parentId: v1.id,
+        beforeId: null,
+      });
+      // A request dropped beside a folder goes first among the requests there.
+      expect(resolveDrop(workspace, request.id, auth.id, 'before')).toEqual({
+        parentId: v1.id,
+        beforeId: a.id,
+      });
+    });
+
+    it('moves a subfolder back up to the level of its parent', () => {
+      const { workspace, v1, auth, collection } = tree();
+      const drop = resolveDrop(workspace, auth.id, v1.id, 'after');
+      expect(drop).toEqual({ parentId: collection.id, beforeId: null });
+      const moved = moveNode(workspace, auth.id, drop!.parentId, drop!.beforeId);
+      expect(getAncestors(moved, auth.id).map((item) => item.node.id)).toEqual([collection.id]);
+    });
+
+    it('refuses invalid drops', () => {
+      const { workspace, v1, auth, collection, other, a, request } = tree();
+      expect(resolveDrop(workspace, v1.id, v1.id, 'inside')).toBeNull();
+      expect(resolveDrop(workspace, v1.id, auth.id, 'inside')).toBeNull();
+      expect(resolveDrop(workspace, v1.id, request.id, 'before')).toBeNull();
+      expect(resolveDrop(workspace, v1.id, null, 'inside')).toBeNull();
+      expect(resolveDrop(workspace, a.id, a.id, 'before')).toBeNull();
+      expect(resolveDrop(workspace, a.id, request.id, 'inside')).toBeNull();
+      expect(resolveDrop(workspace, a.id, collection.id, 'before')).toBeNull();
+      expect(resolveDrop(workspace, collection.id, other.id, 'inside')).toBeNull();
+      expect(resolveDrop(workspace, collection.id, v1.id, 'before')).toBeNull();
+    });
+
+    it('reorders collections and turns requests into drafts', () => {
+      const { workspace, collection, other, draft, a, socket } = tree();
+      expect(resolveDrop(workspace, other.id, collection.id, 'before')).toEqual({
+        parentId: null,
+        beforeId: collection.id,
+      });
+      expect(resolveDrop(workspace, a.id, null, 'inside')).toEqual({
+        parentId: null,
+        beforeId: null,
+      });
+      expect(resolveDrop(workspace, socket.id, draft.id, 'after')).toEqual({
+        parentId: null,
+        beforeId: null,
+      });
+      expect(resolveDrop(workspace, draft.id, other.id, 'inside')).toEqual({
+        parentId: other.id,
+        beforeId: null,
+      });
+    });
+  });
+
+  it('inserts a renamed copy of a request with fresh ids', () => {
+    const { workspace, collection, request } = sample();
+    const edited = { ...request, url: 'https://example.com', headers: [createKeyValue()] };
+    const { workspace: next, id } = insertLeafCopy(
+      workspace,
+      { kind: 'request', request: edited },
+      collection.id,
+      '  Copy  ',
+    );
+    const copy = next.requests.find((item) => item.id === id)!;
+    expect(next.requests[0]).toBe(request);
+    expect(copy).toMatchObject({ name: 'Copy', parentId: collection.id, url: edited.url });
+    expect(copy.headers[0]!.id).not.toBe(edited.headers[0]!.id);
   });
 
   it('duplicates a folder subtree with fresh ids', () => {

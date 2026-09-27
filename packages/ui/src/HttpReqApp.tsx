@@ -62,6 +62,8 @@ import { AboutDialog, SettingsDialog, ShortcutsDialog } from './Dialogs';
 import { RequestEditor } from './editor/RequestEditor';
 import { EnvironmentSelect } from './EnvironmentSelect';
 import { EnvironmentEditor } from './environment/EnvironmentEditor';
+import { SaveAsDialog } from './explorer/SaveAsDialog';
+import { openSaveAsDialog } from './explorer/saveAsDialogStore';
 import { Sidebar } from './explorer/Sidebar';
 import { LayoutToggle } from './LayoutToggle';
 import type { MenuDefinition } from './MenuBar';
@@ -139,6 +141,7 @@ const menus: MenuDefinition[] = [
       { command: 'file.export' },
       { separator: true },
       { command: 'request.save' },
+      { command: 'request.save-as' },
       { separator: true },
       { command: 'request.close' },
       { separator: true },
@@ -186,6 +189,7 @@ const menus: MenuDefinition[] = [
       { command: 'request.focus-url' },
       { separator: true },
       { command: 'request.save' },
+      { command: 'request.save-as' },
       { command: 'request.duplicate' },
       { separator: true },
       { command: 'request.next' },
@@ -459,20 +463,59 @@ export function HttpReqApp({
     [runExecution, runtime, setResponse, recordHistory],
   );
 
-  const saveActive = useCallback(async () => {
-    const id = useWorkbenchStore.getState().activeRequestId;
-    if (!id) return true;
-    const ok = await saveRequest(id);
-    if (!ok) {
+  const reportSaveFailure = useCallback(
+    () =>
       notifications.show({
         color: 'red',
         title: 'Save failed',
         message:
           'The request could not be written to local storage. Your changes are kept; try again.',
-      });
+      }),
+    [],
+  );
+
+  /** Opens "Save as" for the active HTTP or WebSocket request. */
+  const saveActiveAs = useCallback(() => {
+    const state = useWorkbenchStore.getState();
+    const id = state.activeRequestId;
+    if (id && requestKind(state.workspace, id)) openSaveAsDialog({ mode: 'save-as', id });
+  }, []);
+
+  const saveActive = useCallback(async () => {
+    const state = useWorkbenchStore.getState();
+    const id = state.activeRequestId;
+    if (!id) return true;
+    // WebSocket edits are committed as they are made, so saving a socket that is in no
+    // collection yet means choosing where to file it.
+    const socket = state.workspace.websocketRequests.find((request) => request.id === id);
+    if (socket && socket.parentId === null) {
+      openSaveAsDialog({ mode: 'save-as', id });
+      return true;
     }
+    const ok = await saveRequest(id);
+    if (!ok) reportSaveFailure();
     return ok;
-  }, [saveRequest]);
+  }, [saveRequest, reportSaveFailure]);
+
+  /** Completes "Save as": files the request (or a copy) and writes the workspace at once. */
+  const saveAs = useCallback(
+    async (id: string, parentId: string, name: string) => {
+      const state = useWorkbenchStore.getState();
+      const kind = requestKind(state.workspace, id);
+      const savedId = state.saveRequestAs(id, parentId, name);
+      if (!savedId) return;
+      // A copy took over the original's tab; a socket must not stay connected behind it.
+      if (savedId !== id && kind === 'websocket') sockets.forget(id);
+      if (await saveRequest(savedId)) {
+        const saved = useWorkbenchStore.getState();
+        const path = getAncestors(saved.workspace, savedId)
+          .map((item) => item.node.name)
+          .join(' / ');
+        notifications.show({ color: 'teal', message: `Saved to ${path}.` });
+      } else reportSaveFailure();
+    },
+    [saveRequest, sockets, reportSaveFailure],
+  );
 
   /** Activating any tab: at most one of a terminal, an environment or a request is active. */
   const activateTab = useCallback(
@@ -645,6 +688,7 @@ export function HttpReqApp({
 
   const tabCount = tabs.length;
   const httpTabActive = activeKind === 'request';
+  const requestTabActive = activeKind === 'request' || activeKind === 'websocket';
   const commands = useMemo<CommandMap>(() => {
     const active = () => {
       const state = useWorkbenchStore.getState();
@@ -682,6 +726,12 @@ export function HttpReqApp({
         shortcut: [{ key: 's', mod: true }],
         run: () => void saveActive(),
         disabled: tabCount === 0,
+      },
+      'request.save-as': {
+        label: 'Save As…',
+        shortcut: [{ key: 's', mod: true, shift: true }],
+        run: saveActiveAs,
+        disabled: !requestTabActive,
       },
       'request.close': {
         label: 'Close Request',
@@ -862,6 +912,7 @@ export function HttpReqApp({
     newWebSocket,
     createCollection,
     saveActive,
+    saveActiveAs,
     closeTab,
     send,
     duplicateNode,
@@ -879,6 +930,7 @@ export function HttpReqApp({
     sidebarVisible,
     statusBarVisible,
     httpTabActive,
+    requestTabActive,
     desktop,
     mac,
   ]);
@@ -1035,7 +1087,16 @@ export function HttpReqApp({
                         aria-labelledby={requestTabId(activeId)}
                         className={classes.workspace}
                       >
-                        <WebSocketEditor key={activeId} requestId={activeId} />
+                        <WebSocketEditor
+                          key={activeId}
+                          requestId={activeId}
+                          onSave={() => void saveActive()}
+                          onSaveAs={saveActiveAs}
+                          shortcuts={{
+                            save: shortcutLabel('request.save'),
+                            saveAs: shortcutLabel('request.save-as'),
+                          }}
+                        />
                       </div>
                     ) : activeId && tabs.some((tab) => tab.id === activeId) ? (
                       <div
@@ -1059,11 +1120,13 @@ export function HttpReqApp({
                               onSend={() => void send()}
                               onCancel={() => execution.cancel(activeId)}
                               onSave={() => void saveActive()}
+                              onSaveAs={saveActiveAs}
                               urlRef={urlRef}
                               buildCurl={buildCurl}
                               shortcuts={{
                                 send: shortcutLabel('request.send'),
                                 save: shortcutLabel('request.save'),
+                                saveAs: shortcutLabel('request.save-as'),
                                 focusUrl: shortcutLabel('request.focus-url'),
                               }}
                             />
@@ -1137,6 +1200,7 @@ export function HttpReqApp({
                   />
                   <ImportDialog />
                   <ExportDialog />
+                  <SaveAsDialog onSaveAs={saveAs} />
                   <ConfirmDialog />
                   <HostKeyDialog />
                 </AppShell>

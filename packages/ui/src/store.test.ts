@@ -130,6 +130,58 @@ describe('workbench store', () => {
     expect(state().activeRequestId).toBeNull();
   });
 
+  it('files a draft request with Save as, keeping its tab and edits', () => {
+    const collection = state().createCollection();
+    const folder = state().createFolder(collection);
+    const id = state().createRequest(null);
+    state().editRequest(id, { url: 'https://draft.example' });
+    expect(state().saveRequestAs(id, folder, 'Get users')).toBe(id);
+    const saved = state().workspace.requests.find((request) => request.id === id)!;
+    expect(saved).toMatchObject({ name: 'Get users', parentId: folder });
+    // The edits are still a draft, for the caller to commit.
+    expect(state().drafts[id]).toMatchObject({ url: 'https://draft.example', parentId: folder });
+    expect(state().expandedIds.has(collection)).toBe(true);
+    expect(state().expandedIds.has(folder)).toBe(true);
+  });
+
+  it('saves a copy with Save as and hands it the original tab', () => {
+    const collection = state().createCollection();
+    const other = state().createCollection();
+    const id = state().createRequest(collection);
+    state().editRequest(id, { method: 'POST' });
+    const copy = state().saveRequestAs(id, other, 'Create user')!;
+    expect(copy).not.toBe(id);
+    expect(openIds()).toContain(copy);
+    expect(openIds()).not.toContain(id);
+    expect(state().activeRequestId).toBe(copy);
+    expect(state().drafts[id]).toBeUndefined();
+    expect(state().workspace.requests.find((request) => request.id === id)!.method).toBe('GET');
+    expect(state().workspace.requests.find((request) => request.id === copy)).toMatchObject({
+      name: 'Create user',
+      parentId: other,
+      method: 'POST',
+    });
+  });
+
+  it('saves a draft WebSocket request into a collection', () => {
+    const collection = state().createCollection();
+    const id = state().createWebSocketRequest(null);
+    state().editWebSocketRequest(id, { url: 'wss://echo.example' });
+    expect(state().saveRequestAs(id, collection, 'Echo')).toBe(id);
+    expect(state().workspace.websocketRequests.find((item) => item.id === id)).toMatchObject({
+      name: 'Echo',
+      parentId: collection,
+      url: 'wss://echo.example',
+    });
+  });
+
+  it('refuses to Save as into something that is not a collection or folder', () => {
+    const id = state().createRequest(null);
+    const other = state().createRequest(null);
+    expect(state().saveRequestAs(id, other, 'x')).toBeNull();
+    expect(state().saveRequestAs(id, 'missing', 'x')).toBeNull();
+  });
+
   it('reveals a node by expanding its ancestors', () => {
     const collectionId = state().workspace.collections[0]!.id;
     const folderId = state().createFolder(collectionId);

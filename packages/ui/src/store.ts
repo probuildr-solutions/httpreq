@@ -27,6 +27,7 @@ import {
   duplicateNode as duplicateTreeNode,
   findNode,
   getAncestors,
+  insertLeafCopy,
   isLeafNode,
   moveNode as moveTreeNode,
   renameNode as renameTreeNode,
@@ -131,6 +132,13 @@ interface WorkbenchState {
   editWebSocketRequest: (id: string, patch: Partial<WebSocketRequest>) => void;
   renameNode: (id: string, name: string) => void;
   moveNode: (id: string, parentId: string | null, beforeId?: string | null) => void;
+  /**
+   * "Save as" for an HTTP or WebSocket request. A draft (in no collection) is renamed and moved
+   * into `parentId`, keeping its tab and its unsaved edits for the caller to commit. A request
+   * already in a collection is left as last saved, and a copy carrying its edits takes over its
+   * tab. Returns the id of the request that now holds the edits, or null when there is none.
+   */
+  saveRequestAs: (id: string, parentId: string, name: string) => string | null;
   duplicateNode: (id: string) => void;
   deleteNode: (id: string) => void;
   updateContainer: (id: string, patch: { auth?: AuthConfig; description?: string }) => void;
@@ -569,9 +577,58 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       return {
         workspace,
         drafts: draft ? { ...state.drafts, [id]: { ...draft, parentId } } : state.drafts,
-        expandedIds: parentId ? withExpanded(state.expandedIds, [parentId]) : state.expandedIds,
+        // The moved node stays in sight: its new parent, and every container above it, opens.
+        expandedIds: parentId
+          ? withExpanded(state.expandedIds, [
+              ...getAncestors(workspace, parentId).map((item) => item.node.id),
+              parentId,
+            ])
+          : state.expandedIds,
+        selectedNodeId: id,
       };
     }),
+
+  saveRequestAs: (id, parentId, name) => {
+    const state = get();
+    const node = findNode(state.workspace, id);
+    const parent = findNode(state.workspace, parentId);
+    if (!node || !isLeafNode(node) || !parent || isLeafNode(parent)) return null;
+    if (node.node.parentId === null) {
+      get().moveNode(id, parentId);
+      get().renameNode(id, name);
+      return id;
+    }
+    const { workspace, id: copyId } = insertLeafCopy(
+      state.workspace,
+      node.kind === 'request'
+        ? { kind: 'request', request: state.drafts[id] ?? node.node }
+        : { kind: 'websocket', request: node.node },
+      parentId,
+      name,
+    );
+    const open = workspace.openRequestIds;
+    const response = state.responses[id];
+    set({
+      workspace: {
+        ...workspace,
+        openRequestIds: open.includes(id)
+          ? open.map((openId) => (openId === id ? copyId : openId))
+          : [...open, copyId],
+      },
+      // The edits now live in the copy; the original goes back to what was last saved.
+      drafts: without(state.drafts, [id]),
+      saveStatus: without(state.saveStatus, [id]),
+      responses: response ? { ...state.responses, [copyId]: response } : state.responses,
+      activeRequestId: copyId,
+      activeEnvironmentTabId: null,
+      selectedNodeId: copyId,
+      expandedIds: withExpanded(state.expandedIds, [
+        ...getAncestors(workspace, parentId).map((item) => item.node.id),
+        parentId,
+      ]),
+    });
+    return copyId;
+  },
 
   duplicateNode: (id) => {
     const { workspace, id: copyId } = duplicateTreeNode(get().workspace, id);

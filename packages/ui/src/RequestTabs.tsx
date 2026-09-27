@@ -21,6 +21,7 @@ import {
   type ReactNode,
 } from 'react';
 import type { HttpMethod } from '@httpreq/shared';
+import { endTreeDrag, startTreeDrag, TREE_DRAG_TYPE } from './explorer/treeDrag';
 import { methodColor, REQUEST_PANEL_ID, requestTabId } from './methods';
 import classes from './RequestTabs.module.css';
 
@@ -263,6 +264,12 @@ export const RequestTabs = memo(function RequestTabs({
     draggedId.current = id;
     event.dataTransfer.effectAllowed = 'move';
     event.dataTransfer.setData(DRAG_TYPE, id);
+    // A request tab can also be dropped onto the collection tree, to file the request there.
+    const kind = requests.find((request) => request.id === id)?.kind;
+    if (kind === 'request' || kind === 'websocket') {
+      event.dataTransfer.setData(TREE_DRAG_TYPE, id);
+      startTreeDrag(id);
+    }
   };
 
   const onDragOver = (event: DragEvent<HTMLElement>, id: string) => {
@@ -290,6 +297,7 @@ export const RequestTabs = memo(function RequestTabs({
   const endDrag = () => {
     draggedId.current = null;
     setDrop(null);
+    endTreeDrag();
   };
 
   return (
