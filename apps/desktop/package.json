@@ -18,7 +18,7 @@
     "dev": "npm run build && concurrently -k \"npm run dev --workspace=@httpreq/web\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron dist/main/main.js\"",
     "start": "electron dist/main/main.js",
     "icons": "electron scripts/generate-icons.mjs",
-    "package": "electron-builder --config electron-builder.config.cjs",
+    "package": "electron-builder --config electron-builder.config.cjs --publish never",
     "package:dir": "electron-builder --config electron-builder.config.cjs --dir"
   },
   "devDependencies": {
