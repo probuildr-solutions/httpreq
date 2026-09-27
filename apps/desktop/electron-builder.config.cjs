@@ -46,6 +46,14 @@ module.exports = {
     category: 'Development',
     executableName: 'httpreq',
     synopsis: 'Local-first API client',
+    // Keeps the .desktop file named after package.json's desktopName, so docks match the window.
+    syncDesktopName: true,
     target: ['AppImage', 'deb'],
+  },
+  // The .deb maintainer comes from the author in package.json. The npm name (@httpreq/desktop) is
+  // not a valid Debian package name and would put the .deb in a nested release/@httpreq/ folder.
+  deb: {
+    packageName: 'httpreq',
+    artifactName: 'httpreq_${version}_${arch}.${ext}',
   },
 };

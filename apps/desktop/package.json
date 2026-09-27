@@ -3,7 +3,11 @@
   "productName": "HttpReq",
   "version": "0.1.0",
   "description": "Local-first API client for REST requests.",
-  "author": "Yamatri Reddy",
+  "author": {
+    "name": "Yamatri Reddy",
+    "email": "yamatrireddy94@gmail.com"
+  },
+  "desktopName": "httpreq.desktop",
   "homepage": "https://github.com/yamatrireddy/httpreq",
   "license": "GPL-3.0-only",
   "private": true,
