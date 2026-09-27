@@ -5,13 +5,15 @@
 // - The version is the root package.json version, which `npm run version:set` writes to every
 //   workspace. A workspace that disagrees fails the run: the installer, `app.getVersion()` and the
 //   version the renderer shows must be the same release.
-// - A merged pull request is a release when it changed that version, or carries the `release`
-//   label. A manual run is a release when its `release` input is set.
+// - A push to main (a merged pull request) is a release when it changed that version, or when the
+//   pull request it merged carries the `release` label. A manual run is a release when its
+//   `release` input is set.
 // - A release whose tag (v<version>) already exists fails here, before any platform is built, so
 //   a forgotten version bump can never overwrite or duplicate a published release.
 //
-// Inputs (environment): EVENT_NAME, BASE_SHA (the pull request's base commit), PR_LABELS (JSON
-// array of label names), RELEASE_REQUESTED ("true" for a manual release run).
+// Inputs (environment): EVENT_NAME, BASE_SHA (the commit before the push, or a pull request's base
+// commit), PR_LABELS (JSON array of the merged pull request's label names), RELEASE_REQUESTED
+// ("true" for a manual release run).
 // Outputs: version, tag, release, prerelease — written to $GITHUB_OUTPUT when it is set.
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -61,10 +63,11 @@ let reason = 'not a release';
 if (event === 'workflow_dispatch') {
   release = process.env.RELEASE_REQUESTED === 'true';
   if (release) reason = 'requested by the manual run';
-} else if (event === 'pull_request_target' || event === 'pull_request') {
+} else if (event === 'push' || event === 'pull_request_target' || event === 'pull_request') {
   const labels = JSON.parse(process.env.PR_LABELS || '[]');
   let baseVersion = null;
-  if (process.env.BASE_SHA) {
+  // A push that creates the branch has no previous commit (all zeros).
+  if (process.env.BASE_SHA && !/^0+$/.test(process.env.BASE_SHA)) {
     try {
       baseVersion = JSON.parse(git('show', `${process.env.BASE_SHA}:package.json`)).version;
     } catch {
@@ -73,7 +76,7 @@ if (event === 'workflow_dispatch') {
   }
   if (baseVersion && baseVersion !== version) {
     release = true;
-    reason = `the pull request changed the version from ${baseVersion} to ${version}`;
+    reason = `the version changed from ${baseVersion} to ${version}`;
   } else if (labels.includes('release')) {
     release = true;
     reason = 'the pull request has the "release" label';
