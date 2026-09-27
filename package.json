@@ -18,6 +18,7 @@
     "build:web": "npm run build --workspace=@httpreq/web",
     "build:desktop": "npm run build --workspace=@httpreq/desktop",
     "package:desktop": "npm run build && npm run package --workspace=@httpreq/desktop",
+    "release:check": "node apps/desktop/scripts/release-info.mjs",
     "typecheck": "tsc -b --pretty false",
     "test": "vitest run",
     "test:watch": "vitest",

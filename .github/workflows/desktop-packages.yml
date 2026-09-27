@@ -1,0 +1,227 @@
+# Builds the HttpReq desktop installers for Windows, macOS and Linux after a pull request is merged
+# into main, uploads them as workflow artifacts and, for a release, publishes them to a GitHub
+# Release.
+#
+# A merge is a release when the pull request changed the version in the root package.json
+# (`npm run version:set -- 1.2.0`), or carries the `release` label. The release is tagged
+# v<version>; a version containing a hyphen (1.2.0-beta.1) is published as a pre-release.
+# The release is only created after every platform has built and passed its checks, so a failed
+# platform never leaves a release with missing or broken installers.
+#
+# Code signing is optional. Without these repository secrets the packages are unsigned:
+#   WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD      Windows Authenticode certificate (.pfx, base64)
+#   MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD      macOS Developer ID Application certificate (.p12, base64)
+#   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID    macOS notarization
+name: Desktop packages
+
+on:
+  # pull_request_target (not pull_request) so that merges from forks can read the signing secrets
+  # and publish releases. It is safe here because only merged pull requests run, and they check
+  # out the merge commit, which is already on main; no unmerged pull request code is executed.
+  pull_request_target:
+    types: [closed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Publish the packages as the GitHub Release v<package.json version>
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  prepare:
+    name: Prepare
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      sha: ${{ steps.sha.outputs.sha }}
+      version: ${{ steps.info.outputs.version }}
+      tag: ${{ steps.info.outputs.tag }}
+      release: ${{ steps.info.outputs.release }}
+      prerelease: ${{ steps.info.outputs.prerelease }}
+    steps:
+      - name: Resolve the commit to build
+        id: sha
+        env:
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: echo "sha=${MERGE_SHA:-$GITHUB_SHA}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.sha.outputs.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Check the version and decide whether this is a release
+        id: info
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          RELEASE_REQUESTED: ${{ inputs.release }}
+        run: node apps/desktop/scripts/release-info.mjs
+
+  package:
+    name: Package (${{ matrix.name }})
+    needs: prepare
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      # Build every platform even when one fails, so each failure is reported on its own.
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            platform: win
+            os: windows-latest
+            packages: |
+              apps/desktop/release/HttpReq-Setup-*.exe
+          - name: macOS
+            platform: mac
+            os: macos-latest
+            packages: |
+              apps/desktop/release/HttpReq-*.dmg
+              apps/desktop/release/HttpReq-*.zip
+          - name: Linux
+            platform: linux
+            os: ubuntu-latest
+            packages: |
+              apps/desktop/release/HttpReq-*.AppImage
+              apps/desktop/release/httpreq_*.deb
+    env:
+      # Keep Electron and electron-builder downloads (Electron zips, NSIS, fpm, AppImage tools) in
+      # one place per OS so they can be cached between runs.
+      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+      electron_config_cache: ${{ github.workspace }}/.cache/electron
+      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Cache Electron downloads
+        uses: actions/cache@v4
+        with:
+          path: .cache
+          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: electron-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and package
+        run: npm run package:desktop
+        env:
+          # Each platform only sees its own certificate; empty values build unsigned packages.
+          WIN_CSC_LINK: ${{ matrix.platform == 'win' && secrets.WIN_CSC_LINK || '' }}
+          WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
+          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK != '' }}
+          APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+
+      - name: Verify packages
+        run: node apps/desktop/scripts/verify-packages.mjs ${{ matrix.platform }}
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: HttpReq-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}
+          path: |
+            ${{ matrix.packages }}
+            apps/desktop/release/SHA256SUMS-${{ matrix.platform }}.txt
+          if-no-files-found: error
+          # Installers are already compressed.
+          compression-level: 0
+          retention-days: 30
+
+  release:
+    name: Publish release ${{ needs.prepare.outputs.tag }}
+    # Runs only when every platform succeeded (a failed or cancelled leg skips it).
+    needs: [prepare, package]
+    if: needs.prepare.outputs.release == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          pattern: HttpReq-${{ needs.prepare.outputs.version }}-*
+          path: dist
+          merge-multiple: true
+
+      - name: Combine and check checksums
+        working-directory: dist
+        run: |
+          cat SHA256SUMS-*.txt > SHA256SUMS.txt
+          rm SHA256SUMS-*.txt
+          sha256sum --check --strict SHA256SUMS.txt
+          ls -l
+
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          SHA: ${{ needs.prepare.outputs.sha }}
+          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+        run: |
+          flags=()
+          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+          # Upload everything to a draft first and publish it last, so users (and the app's update
+          # check) never see a release whose assets are still uploading.
+          gh release create "$TAG" dist/* --draft --target "$SHA" --title "HttpReq $VERSION" \
+            --generate-notes "${flags[@]}"
+          gh release edit "$TAG" --draft=false
+          echo "Published [$TAG]($GITHUB_SERVER_URL/$GH_REPO/releases/tag/$TAG)." >> "$GITHUB_STEP_SUMMARY"
+
+  report:
+    name: Report
+    needs: [prepare, package, release]
+    if: always() && needs.prepare.result != 'skipped'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Summarize
+        env:
+          PREPARE: ${{ needs.prepare.result }}
+          PACKAGE: ${{ needs.package.result }}
+          RELEASE: ${{ needs.release.result }}
+          IS_RELEASE: ${{ needs.prepare.outputs.release }}
+          TAG: ${{ needs.prepare.outputs.tag }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "### Desktop packages"
+            echo
+            echo "| Step | Result |"
+            echo "| --- | --- |"
+            echo "| Version check | $PREPARE |"
+            echo "| Packages (all platforms) | $PACKAGE |"
+            echo "| Release $TAG | $([ "$IS_RELEASE" = "true" ] && echo "$RELEASE" || echo "not a release") |"
+            echo
+            echo "Download the installers from the **Artifacts** section of [this run]($RUN_URL)."
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$PREPARE" != "success" ] || [ "$PACKAGE" != "success" ]; then
+            echo "::error::Packaging failed; see the failed job above. No release was published."
+            exit 1
+          fi
+          if [ "$IS_RELEASE" = "true" ] && [ "$RELEASE" != "success" ]; then
+            echo "::error::The packages built, but publishing release $TAG failed."
+            exit 1
+          fi
