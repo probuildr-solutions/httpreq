@@ -4,6 +4,7 @@ import {
   IconDots,
   IconPencil,
   IconPlayerPlay,
+  IconPlayerStop,
   IconPlus,
   IconServer,
   IconTrash,
@@ -41,9 +42,22 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
       (session) => session?.profileId === profileId && session.status === 'connected',
     ).length;
 
+  /** Sessions of a profile that are up or on their way up: what "Disconnect" would end. */
+  const activeSessionIds = (profileId: string) =>
+    Object.values(sessions).flatMap((session) =>
+      session?.profileId === profileId &&
+      (session.status === 'connected' || session.status === 'connecting')
+        ? [session.sessionId]
+        : [],
+    );
+
   const connect = (profile: SshProfile) => {
     void ssh.open(profile);
     onOpened?.();
+  };
+
+  const disconnect = (profile: SshProfile) => {
+    for (const sessionId of activeSessionIds(profile.id)) void ssh.disconnect(sessionId);
   };
 
   const remove = async (profile: SshProfile) => {
@@ -137,6 +151,7 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
         ) : (
           profiles.map((profile) => {
             const live = liveCount(profile.id);
+            const active = activeSessionIds(profile.id).length > 0;
             const checked = selection.isSelected(profile.id);
             return (
               <div
@@ -182,15 +197,20 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
                   </span>
                 </button>
                 <span className={classes.itemActions} hidden={selection.selecting}>
-                  <Tooltip label="Connect">
+                  {/* Follows the live session state: connect when idle, disconnect when up. */}
+                  <Tooltip label={active ? 'Disconnect' : 'Connect'}>
                     <ActionIcon
-                      variant="subtle"
-                      color="gray"
+                      variant="light"
+                      color={active ? 'red' : 'teal'}
                       size="sm"
-                      aria-label={`Connect to ${profile.name}`}
-                      onClick={() => connect(profile)}
+                      className={classes.connectButton}
+                      data-state={active ? 'active' : 'idle'}
+                      aria-label={
+                        active ? `Disconnect from ${profile.name}` : `Connect to ${profile.name}`
+                      }
+                      onClick={() => (active ? disconnect(profile) : connect(profile))}
                     >
-                      <IconPlayerPlay size={14} />
+                      {active ? <IconPlayerStop size={13} /> : <IconPlayerPlay size={13} />}
                     </ActionIcon>
                   </Tooltip>
                   <Menu position="bottom-end" withinPortal shadow="md" width={190}>

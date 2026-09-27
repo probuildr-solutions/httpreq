@@ -152,6 +152,7 @@ export const isWindowAction = (value: unknown): value is WindowAction =>
 export const MENU_COMMANDS = [
   'request.new',
   'file.import',
+  'file.export',
   'request.close',
   'request.save',
   'request.send',
@@ -163,6 +164,7 @@ export const MENU_COMMANDS = [
   'view.toggle-status-bar',
   'tools.settings',
   'help.shortcuts',
+  'help.check-updates',
   'help.about',
 ] as const;
 
@@ -175,6 +177,20 @@ export interface DesktopWindowState {
   maximized: boolean;
   fullscreen: boolean;
 }
+
+/** Identity of a build of the app: the same for the web bundle and the desktop app that ships it. */
+export interface BuildInfo {
+  version: string;
+  /** Short commit hash, or `dev` for a build outside a git checkout. */
+  commit: string;
+  /** ISO 8601 time of the build. */
+  builtAt: string;
+}
+
+/** Where published releases live; the desktop app checks it for newer versions. */
+export const RELEASES_URL = 'https://github.com/yamatrireddy/httpreq/releases';
+export const LATEST_RELEASE_API =
+  'https://api.github.com/repos/yamatrireddy/httpreq/releases/latest';
 
 export interface AppInfo {
   name: string;

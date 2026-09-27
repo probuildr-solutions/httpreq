@@ -43,7 +43,11 @@ export interface PendingHostKey {
 export interface SshApi {
   /** Null in the browser, and in a desktop build whose SSH bridge failed to load. */
   readonly available: boolean;
-  /** Opens a terminal tab and connects it. Returns the session id, or null when unavailable. */
+  /**
+   * Connects a profile in its terminal tab: the tab already open for it when there is one (which
+   * is focused and reconnected if needed), a new one otherwise. Returns the session id, or null
+   * when unavailable.
+   */
   open: (profile: SshProfile) => Promise<string | null>;
   disconnect: (sessionId: string) => Promise<void>;
   /** Closes the session and its tab. */
@@ -205,30 +209,6 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
     [bridge],
   );
 
-  const open = useCallback(
-    async (profile: SshProfile) => {
-      if (!bridge) return null;
-      const sessionId = createId();
-      const store = useWorkbenchStore.getState();
-      useConnectionsStore.getState().setSession({
-        sessionId,
-        profileId: profile.id,
-        name: profile.name,
-        status: 'connecting',
-        error: null,
-        startedAt: null,
-        generation: 1,
-      });
-      store.openSshSession(sessionId);
-      sessionProfiles.current.set(sessionId, profile);
-      pendingOutput.current.delete(sessionId);
-
-      await start(sessionId, profile);
-      return sessionId;
-    },
-    [bridge, start],
-  );
-
   /**
    * Ends the shell and clears everything that belonged to it, so the view falls back to its
    * disconnected state and the next connection cannot inherit this one's output.
@@ -272,6 +252,46 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
       await start(sessionId, profile);
     },
     [bridge, start],
+  );
+
+  /**
+   * One tab per connection: when the profile already has a terminal tab, that tab is brought to
+   * the front and, unless it is live or on its way there, reconnected in place. A new tab is
+   * only created for a profile that has none open.
+   */
+  const open = useCallback(
+    async (profile: SshProfile) => {
+      if (!bridge) return null;
+      const store = useWorkbenchStore.getState();
+      const sessions = useConnectionsStore.getState().sessions;
+      const existing = store.openSshSessionIds.find((id) => sessions[id]?.profileId === profile.id);
+      if (existing) {
+        store.openSshSession(existing);
+        // The profile may have been edited since the tab opened; reconnect with the latest.
+        sessionProfiles.current.set(existing, profile);
+        const status = sessions[existing]?.status;
+        if (status !== 'connected' && status !== 'connecting') await reconnect(existing);
+        return existing;
+      }
+
+      const sessionId = createId();
+      useConnectionsStore.getState().setSession({
+        sessionId,
+        profileId: profile.id,
+        name: profile.name,
+        status: 'connecting',
+        error: null,
+        startedAt: null,
+        generation: 1,
+      });
+      store.openSshSession(sessionId);
+      sessionProfiles.current.set(sessionId, profile);
+      pendingOutput.current.delete(sessionId);
+
+      await start(sessionId, profile);
+      return sessionId;
+    },
+    [bridge, start, reconnect],
   );
 
   const test = useCallback(

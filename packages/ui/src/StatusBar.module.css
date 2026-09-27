@@ -108,3 +108,9 @@
     display: none;
   }
 }
+
+/* An available update: the one accent in the bar, so it is noticed without being loud. */
+.update {
+  color: var(--mantine-color-violet-text);
+  font-weight: 600;
+}

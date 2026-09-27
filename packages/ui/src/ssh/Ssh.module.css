@@ -162,8 +162,16 @@
 
 .itemActions {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
   flex: none;
+}
+
+/* Connect (green) or Disconnect (red): the tint changes the moment the session state does. */
+.connectButton {
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
 }
 
 .empty {

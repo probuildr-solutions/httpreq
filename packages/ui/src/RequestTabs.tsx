@@ -1,8 +1,10 @@
 import { ActionIcon, Menu, Tooltip, VisuallyHidden } from '@mantine/core';
 import {
+  IconAlertCircleFilled,
   IconChevronDown,
   IconChevronLeft,
   IconChevronRight,
+  IconLoader2,
   IconPlus,
   IconVariable,
   IconX,
@@ -25,6 +27,18 @@ import classes from './RequestTabs.module.css';
 /** What a tab can hold: an HTTP request, a WebSocket request, an environment or an SSH terminal. */
 export type TabKind = 'request' | 'websocket' | 'environment' | 'ssh';
 
+/** Live state of a WebSocket or SSH tab; the SSH and WebSocket status unions are identical. */
+export type TabConnectionStatus =
+  'connected' | 'connecting' | 'disconnecting' | 'disconnected' | 'error';
+
+const STATUS_LABEL: Record<TabConnectionStatus, string> = {
+  connected: 'Connected',
+  connecting: 'Connecting…',
+  disconnecting: 'Disconnecting…',
+  disconnected: 'Disconnected',
+  error: 'Error',
+};
+
 export interface TabItem {
   id: string;
   kind: TabKind;
@@ -32,8 +46,8 @@ export interface TabItem {
   /** HTTP tabs only. */
   method?: HttpMethod;
   url?: string;
-  /** Live state for WebSocket and SSH tabs, shown as a dot on the tab. */
-  connected?: boolean;
+  /** Live state for WebSocket and SSH tabs, shown as an icon and a label after the name. */
+  status?: TabConnectionStatus;
 }
 
 export interface RequestTabsProps {
@@ -478,6 +492,27 @@ function TabBadge({ item }: { item: TabItem }) {
   );
 }
 
+/**
+ * A connection tab's state as an icon followed by a word, inside the tab's label and apart from
+ * its close button: the two never compete for the same slot.
+ */
+function TabStatus({ status }: { status: TabConnectionStatus }) {
+  const icon =
+    status === 'connecting' || status === 'disconnecting' ? (
+      <IconLoader2 size={11} className={classes.statusSpin} aria-hidden />
+    ) : status === 'error' ? (
+      <IconAlertCircleFilled size={11} aria-hidden />
+    ) : (
+      <span className={classes.statusDot} aria-hidden />
+    );
+  return (
+    <span className={classes.status} data-status={status}>
+      {icon}
+      <span className={classes.statusLabel}>{STATUS_LABEL[status]}</span>
+    </span>
+  );
+}
+
 interface TabProps {
   request: TabItem;
   active: boolean;
@@ -520,6 +555,7 @@ const RequestTab = memo(function RequestTab({
       data-active={active || undefined}
       data-unsaved={unsaved || undefined}
       data-drop={dropSide}
+      data-connection={request.status ? '' : undefined}
       draggable
       onDragStart={(event) => onDragStart(event, request.id)}
       onDragOver={(event) => onDragOver(event, request.id)}
@@ -557,12 +593,10 @@ const RequestTab = memo(function RequestTab({
       >
         <TabBadge item={request} />
         <span className={classes.name}>{request.name}</span>
+        {request.status && <TabStatus status={request.status} />}
         {unsaved && <VisuallyHidden>(unsaved changes)</VisuallyHidden>}
       </button>
       <span className={classes.trailing}>
-        {request.connected && (
-          <span className={classes.connectedDot} aria-label="connected" title="Connected" />
-        )}
         {unsaved && <span className={classes.unsavedDot} aria-hidden />}
         {closable && (
           <button

@@ -29,6 +29,7 @@ export const buildMacMenu = ({ command, openExternal }: MacMenuHandlers) => {
       label: app.name,
       submenu: [
         { role: 'about' },
+        item('Check for Updates…', 'help.check-updates'),
         { type: 'separator' },
         item('Settings…', 'tools.settings', 'Cmd+,'),
         { type: 'separator' },
@@ -47,6 +48,7 @@ export const buildMacMenu = ({ command, openExternal }: MacMenuHandlers) => {
         item('New Request', 'request.new', 'Cmd+T'),
         { type: 'separator' },
         item('Import…', 'file.import'),
+        item('Export…', 'file.export'),
         { type: 'separator' },
         item('Save', 'request.save', 'Cmd+S'),
         { type: 'separator' },

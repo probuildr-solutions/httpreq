@@ -1,7 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
+import { createSshProfile } from '@httpreq/shared';
 import { createWorkspace } from '@httpreq/workspace';
+import { act } from 'react';
+import { resetConnections, useConnectionsStore } from '../connections';
 import { useWorkbenchStore } from '../store';
 import { SshContext, type SshApi } from './useSsh';
 import { SshPanel } from './SshPanel';
@@ -78,5 +81,39 @@ describe('new SSH connections', () => {
     const credentialId = vi.mocked(ssh.setCredential).mock.calls[0]![0];
     expect(ssh.deleteCredential).toHaveBeenCalledWith(credentialId);
     expect(store().workspace.sshProfiles).toEqual([]);
+  });
+});
+
+describe('the connect button', () => {
+  it('connects when idle and disconnects when live, following the session state', async () => {
+    const profile = createSshProfile('Prod');
+    store().createSshProfile(profile);
+    resetConnections();
+    const ssh = api();
+    mount(ssh);
+
+    const connect = screen.getByRole('button', { name: 'Connect to Prod' });
+    expect(connect).toHaveAttribute('data-state', 'idle');
+    fireEvent.click(connect);
+    expect(ssh.open).toHaveBeenCalledWith(expect.objectContaining({ id: profile.id }));
+
+    act(() =>
+      useConnectionsStore.getState().setSession({
+        sessionId: 's1',
+        profileId: profile.id,
+        name: 'Prod',
+        status: 'connected',
+        error: null,
+        startedAt: null,
+        generation: 1,
+      }),
+    );
+    const disconnect = await screen.findByRole('button', { name: 'Disconnect from Prod' });
+    expect(disconnect).toHaveAttribute('data-state', 'active');
+    fireEvent.click(disconnect);
+    expect(ssh.disconnect).toHaveBeenCalledWith('s1');
+
+    act(() => useConnectionsStore.getState().patchSession('s1', { status: 'disconnected' }));
+    expect(await screen.findByRole('button', { name: 'Connect to Prod' })).toBeInTheDocument();
   });
 });

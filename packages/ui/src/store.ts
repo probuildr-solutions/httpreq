@@ -715,7 +715,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   setEnvironmentVariable: (key, value, secret) => {
     const environment = activeEnvironment(get().workspace);
     if (!environment || !key) return false;
-    const existing = environment.variables.find((variable) => variable.key === key);
+    // The variable a reference resolves to: the last enabled one of that name (later rows win),
+    // or failing that the first, disabled one, which is then switched on.
+    const matches = environment.variables.filter((variable) => variable.key === key);
+    const existing = [...matches].reverse().find((variable) => variable.enabled) ?? matches[0];
     get().updateEnvironment(environment.id, {
       variables: existing
         ? environment.variables.map((variable) =>

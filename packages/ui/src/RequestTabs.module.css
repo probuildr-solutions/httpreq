@@ -238,11 +238,87 @@
   height: 0;
 }
 
-/* Live WebSocket or SSH connection on this tab. */
-.connectedDot {
-  width: 6px;
-  height: 6px;
+/* ---- Connection status (WebSocket and SSH tabs) ------------------------------------------- */
+
+/* A connection tab carries its status label, so it may grow a little wider than a request tab. */
+.tabWrapper[data-connection] {
+  max-width: 300px;
+}
+
+/*
+ * Sized for whole pixels: the strip's 33px content box centres a 19px badge 7px down, and the
+ * badge centres its 7px dot and 11px icons 6px and 4px down. With even/odd mismatches any of them
+ * lands on a half pixel and is snapped away from the text beside it.
+ */
+.status {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  height: 19px;
+  padding: 0 7px 0 6px;
+  border-radius: 10px;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  color: var(--mantine-color-dimmed);
+  background: light-dark(var(--mantine-color-gray-1), var(--mantine-color-dark-5));
+}
+
+.status[data-status='connected'] {
+  color: var(--mantine-color-teal-text);
+  background: light-dark(var(--mantine-color-teal-0), rgba(18, 184, 134, 0.14));
+}
+
+.status[data-status='connecting'],
+.status[data-status='disconnecting'] {
+  color: var(--mantine-color-yellow-text);
+  background: light-dark(var(--mantine-color-yellow-0), rgba(250, 176, 5, 0.12));
+}
+
+.status[data-status='error'] {
+  color: var(--mantine-color-red-text);
+  background: light-dark(var(--mantine-color-red-0), rgba(250, 82, 82, 0.14));
+}
+
+/* The label's box is trimmed to its capital letters, so centring aligns the glyphs themselves
+   with the dot, rather than the font's line box, which sits a little above them. */
+.statusLabel {
+  text-box: trim-both cap alphabetic;
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
   border-radius: 50%;
-  background: var(--mantine-color-teal-6);
   flex: none;
+  background: currentColor;
+}
+
+.status[data-status='disconnected'] .statusDot {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+
+.statusSpin {
+  animation: tab-status-spin 900ms linear infinite;
+}
+
+@keyframes tab-status-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .statusSpin {
+    animation: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .status {
+    border: 1px solid CanvasText;
+  }
 }

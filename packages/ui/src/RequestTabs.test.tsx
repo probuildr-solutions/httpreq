@@ -146,3 +146,32 @@ describe('RequestTabs', () => {
 });
 
 const openedMenu = async () => within(await screen.findByLabelText('Tab actions'));
+
+describe('connection tabs', () => {
+  it('show their status as an icon and a label, apart from the close button', () => {
+    render(
+      <MantineProvider env="test">
+        <RequestTabs
+          requests={[
+            { id: 's', kind: 'ssh', name: 'Lab', status: 'connected' },
+            { id: 'w', kind: 'websocket', name: 'Feed', url: 'wss://x', status: 'connecting' },
+            { id: 'e', kind: 'websocket', name: 'Broken', url: 'wss://y', status: 'error' },
+          ]}
+          activeId="s"
+          unsavedIds={new Set()}
+          onActivate={vi.fn()}
+          onClose={vi.fn()}
+          onNew={vi.fn()}
+          onMove={vi.fn()}
+        />
+      </MantineProvider>,
+    );
+    const [ssh, socket, broken] = screen.getAllByRole('tab');
+    expect(ssh).toHaveTextContent('LabConnected');
+    expect(socket).toHaveTextContent('FeedConnecting…');
+    expect(broken).toHaveTextContent('BrokenError');
+    // The close control is its own button, outside the tab's label.
+    const close = screen.getByRole('button', { name: 'Close Lab' });
+    expect(ssh!.contains(close)).toBe(false);
+  });
+});

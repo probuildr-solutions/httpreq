@@ -6,12 +6,19 @@
 /** Electron is hoisted to the workspace root, so read the exact installed version from there. */
 const electronVersion = require('electron/package.json').version;
 
+/**
+ * The version lives in the root package.json, the same one the web build reads, so the installer,
+ * `app.getVersion()` and the version the renderer shows are always the same release.
+ */
+const { version } = require('../../package.json');
+
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
   appId: 'dev.httpreq.desktop',
   productName: 'HttpReq',
   copyright: 'Copyright © 2026 Yamatri Reddy',
   electronVersion,
+  extraMetadata: { version },
   directories: { output: 'release', buildResources: 'build' },
   files: ['dist/**/*', 'resources/**/*', 'package.json', '!**/*.map'],
   extraResources: [{ from: '../web/dist', to: 'renderer', filter: ['**/*', '!**/*.map'] }],

@@ -1,4 +1,4 @@
-import { ActionIcon, Popover, Text, UnstyledButton } from '@mantine/core';
+import { ActionIcon, Button, Group, Popover, Text, TextInput, UnstyledButton } from '@mantine/core';
 import { IconEye, IconEyeOff } from '@tabler/icons-react';
 import {
   forwardRef,
@@ -13,6 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 import { parseTemplate } from '@httpreq/api-client';
+import { useWorkbenchStore } from '../store';
 import { useVariables } from '../variableContext';
 import classes from './VariableInput.module.css';
 
@@ -84,18 +85,29 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
     }, []);
     useLayoutEffect(syncScroll, [value, syncScroll]);
 
-    /* Hover card for the variable under the pointer. */
+    /*
+     * Hover card for the variable under the pointer. Once the user starts editing the variable in
+     * it, the card is pinned: it stays open, on that variable, until it is saved, cancelled or
+     * dismissed, however the pointer moves.
+     */
     const [hover, setHover] = useState<{ name: string; left: number; width: number } | null>(null);
+    const pinned = useRef(false);
     const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
     const keepHover = () => clearTimeout(closeTimer.current);
     const releaseHover = () => {
       clearTimeout(closeTimer.current);
+      if (pinned.current) return;
       closeTimer.current = setTimeout(() => setHover(null), CLOSE_DELAY);
+    };
+    const dismissHover = () => {
+      clearTimeout(closeTimer.current);
+      pinned.current = false;
+      setHover(null);
     };
     const onPointerMove = (clientX: number, clientY: number) => {
       const mirror = mirrorRef.current;
       const root = rootRef.current;
-      if (!mirror || !root || !highlighted) return;
+      if (!mirror || !root || !highlighted || pinned.current) return;
       const origin = root.getBoundingClientRect();
       for (const span of mirror.querySelectorAll<HTMLElement>('[data-variable]')) {
         const rect = span.getBoundingClientRect();
@@ -299,6 +311,7 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
 
         <Popover
           opened={!!hover && !suggestionsOpen}
+          onClose={dismissHover}
           position="bottom-start"
           offset={6}
           withinPortal
@@ -312,8 +325,22 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
               aria-hidden
             />
           </Popover.Target>
-          <Popover.Dropdown p="xs" onMouseEnter={keepHover} onMouseLeave={releaseHover} maw={360}>
-            {hover && <VariableDetails name={hover.name} />}
+          <Popover.Dropdown p="xs" onMouseEnter={keepHover} onMouseLeave={releaseHover} maw={380}>
+            {hover && (
+              <VariableDetails
+                key={hover.name}
+                name={hover.name}
+                editable={!disabled}
+                onEditStart={() => {
+                  keepHover();
+                  pinned.current = true;
+                }}
+                onEditEnd={(saved) => {
+                  dismissHover();
+                  if (saved) inputRef.current?.focus();
+                }}
+              />
+            )}
           </Popover.Dropdown>
         </Popover>
 
@@ -337,17 +364,68 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
   },
 );
 
-/** Resolved value and source of one variable; secrets need an explicit reveal. */
-export function VariableDetails({ name }: { name: string }) {
+interface VariableDetailsProps {
+  name: string;
+  /** Offers a "Replace with" field that writes the variable to the active environment. */
+  editable?: boolean;
+  /** The user started editing: the card should stay open until {@link onEditEnd}. */
+  onEditStart?: () => void;
+  /** Editing ended, by saving (`true`) or cancelling (`false`). */
+  onEditEnd?: (saved: boolean) => void;
+}
+
+/**
+ * Current value and source of one variable, and a field to change it in place. Secrets need an
+ * explicit reveal. Saving writes the active environment, so every `{{reference}}` to the variable,
+ * in this request and any other, resolves to the new value at once.
+ */
+export function VariableDetails({
+  name,
+  editable = false,
+  onEditStart,
+  onEditEnd,
+}: VariableDetailsProps) {
   const { resolver, environmentName } = useVariables();
+  const setEnvironmentVariable = useWorkbenchStore((state) => state.setEnvironmentVariable);
   const [revealed, setRevealed] = useState(false);
   const definition = resolver.lookup(name);
+  // A secret's value is never pre-filled: it would be on screen without the user asking for it.
+  const initial = definition && !definition.secret ? definition.value : '';
+  const [draft, setDraft] = useState(initial);
+  const [editing, setEditing] = useState(false);
+
+  // Dynamic variables are generated at send time; there is nothing stored to edit.
+  const canEdit = editable && !!environmentName && !definition?.dynamic;
+  const changed = definition?.secret ? draft !== '' : !definition || draft !== initial;
+  const resolved =
+    definition && !definition.dynamic && !definition.secret && definition.value.includes('{{')
+      ? resolver.resolve(definition.value)
+      : null;
+
+  const beginEditing = () => {
+    if (editing) return;
+    setEditing(true);
+    onEditStart?.();
+  };
+
+  const save = () => {
+    if (!changed) return;
+    setEnvironmentVariable(name, draft, definition?.secret ?? false);
+    setEditing(false);
+    onEditEnd?.(true);
+  };
+
+  const cancel = () => {
+    setDraft(initial);
+    setEditing(false);
+    onEditEnd?.(false);
+  };
 
   return (
     <div className={classes.details}>
       <Text size="xs" ff="monospace" fw={600}>{`{{${name}}}`}</Text>
       {!definition ? (
-        <Text size="xs" c="red">
+        <Text size="xs" c="red" mt={4}>
           {environmentName
             ? `Not defined in “${environmentName}”. It is sent as written.`
             : 'No environment is selected.'}
@@ -355,7 +433,7 @@ export function VariableDetails({ name }: { name: string }) {
       ) : (
         <>
           <Text size="xs" c="dimmed" mt={6}>
-            {definition.dynamic ? 'Generated at send time' : 'Resolved'}
+            {definition.dynamic ? 'Generated at send time' : 'Current value'}
           </Text>
           <div className={classes.detailsValue}>
             <Text size="xs" ff="monospace" className={classes.value}>
@@ -370,6 +448,16 @@ export function VariableDetails({ name }: { name: string }) {
               </UnstyledButton>
             )}
           </div>
+          {resolved !== null && (
+            <>
+              <Text size="xs" c="dimmed" mt={6}>
+                Resolves to
+              </Text>
+              <Text size="xs" ff="monospace" className={classes.value}>
+                {resolved}
+              </Text>
+            </>
+          )}
           <Text size="xs" c="dimmed" mt={6}>
             Source
           </Text>
@@ -377,6 +465,50 @@ export function VariableDetails({ name }: { name: string }) {
             {definition.dynamic ? 'Dynamic variable' : `${definition.source} environment`}
           </Text>
         </>
+      )}
+      {canEdit && (
+        <form
+          className={classes.editor}
+          onSubmit={(event) => {
+            event.preventDefault();
+            // The card is portalled, but React still bubbles its events to the URL bar's form.
+            event.stopPropagation();
+            save();
+          }}
+        >
+          <TextInput
+            size="xs"
+            label={definition ? 'Replace with' : `Add to “${environmentName}”`}
+            placeholder={definition?.secret ? 'New secret value' : 'New value'}
+            type={definition?.secret && !revealed ? 'password' : 'text'}
+            value={draft}
+            spellCheck={false}
+            autoComplete="off"
+            classNames={{ input: classes.editorInput }}
+            onFocus={beginEditing}
+            onChange={(event) => {
+              beginEditing();
+              setDraft(event.currentTarget.value);
+            }}
+            onKeyDown={(event) => {
+              event.stopPropagation();
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                cancel();
+              }
+            }}
+          />
+          <Group gap={6} justify="flex-end" mt={8}>
+            {editing && (
+              <Button size="compact-xs" variant="default" onClick={cancel}>
+                Cancel
+              </Button>
+            )}
+            <Button size="compact-xs" type="submit" disabled={!changed}>
+              {definition ? 'Save' : 'Add variable'}
+            </Button>
+          </Group>
+        </form>
       )}
     </div>
   );

@@ -13,12 +13,18 @@ import {
 } from '@mantine/core';
 import { IconLayoutColumns, IconLayoutRows } from '@tabler/icons-react';
 import { Fragment, useEffect, useState } from 'react';
-import { DOCUMENTATION_URL, type AppInfo, type DesktopBridge } from '@httpreq/shared';
+import {
+  DOCUMENTATION_URL,
+  type AppInfo,
+  type BuildInfo,
+  type DesktopBridge,
+} from '@httpreq/shared';
 import { AppLogo } from './AppLogo';
 import { AppModal } from './AppModal';
 import type { CommandMap } from './commands';
 import { DEFAULT_SPLIT_RATIO, usePreferences, type ResponsePosition } from './preferences';
 import { formatChord, type KeyChord } from './shortcuts';
+import { useUpdates, type UpdateInfo } from './updates';
 
 interface ModalProps {
   opened: boolean;
@@ -198,13 +204,83 @@ export function ShortcutsDialog({
   );
 }
 
+const buildDate = (iso: string) => {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? iso
+    : date.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
+};
+
+/** "Up to date", "Checking…" or the available update, with the way to get it. */
+function UpdateStatusLine({
+  onCheck,
+  onApply,
+}: {
+  onCheck: () => Promise<void>;
+  onApply?: (update: UpdateInfo) => void;
+}) {
+  const status = useUpdates((state) => state.status);
+  const update = useUpdates((state) => state.update);
+  const [checking, setChecking] = useState(false);
+  const check = async () => {
+    setChecking(true);
+    try {
+      await onCheck();
+    } finally {
+      setChecking(false);
+    }
+  };
+  return (
+    <Stack gap={6} align="center" mt="xs">
+      {update ? (
+        <Text size="sm" c="violet" fw={600}>
+          Version {update.version} is available.
+        </Text>
+      ) : status === 'current' ? (
+        <Text size="xs" c="dimmed">
+          HttpReq is up to date.
+        </Text>
+      ) : status === 'error' ? (
+        <Text size="xs" c="dimmed">
+          The last update check did not complete.
+        </Text>
+      ) : null}
+      <Group gap="xs" justify="center">
+        {update && onApply && (
+          <Button size="xs" onClick={() => onApply(update)}>
+            {update.kind === 'deployment' ? 'Reload to update' : 'Download update'}
+          </Button>
+        )}
+        <Button
+          size="xs"
+          variant="default"
+          loading={checking || status === 'checking'}
+          onClick={() => void check()}
+        >
+          Check for updates
+        </Button>
+      </Group>
+    </Stack>
+  );
+}
+
 export function AboutDialog({
   opened,
   onClose,
   version,
+  build,
   desktop,
   onOpenDocumentation,
-}: ModalProps & { version?: string; desktop?: DesktopBridge; onOpenDocumentation: () => void }) {
+  onCheckForUpdates,
+  onApplyUpdate,
+}: ModalProps & {
+  version?: string;
+  build?: BuildInfo;
+  desktop?: DesktopBridge;
+  onOpenDocumentation: () => void;
+  onCheckForUpdates?: () => Promise<void>;
+  onApplyUpdate?: (update: UpdateInfo) => void;
+}) {
   const [info, setInfo] = useState<AppInfo | null>(null);
   useEffect(() => {
     if (opened && desktop && !info) void desktop.getAppInfo().then(setInfo);
@@ -225,8 +301,13 @@ export function AboutDialog({
           HttpReq
         </Text>
         <Text size="sm" c="dimmed">
-          Local-first API client · version {info?.version ?? version ?? 'unknown'}
+          Local-first API client · version {version ?? info?.version ?? 'unknown'}
         </Text>
+        {build && build.commit !== 'dev' && (
+          <Text size="xs" c="dimmed" ff="monospace">
+            Build {build.commit} · {buildDate(build.builtAt)}
+          </Text>
+        )}
         {info && (
           <Text size="xs" c="dimmed" ff="monospace">
             Electron {info.versions.electron} · Chromium {info.versions.chrome} · Node{' '}
@@ -250,6 +331,9 @@ export function AboutDialog({
         >
           Documentation
         </Anchor>
+        {onCheckForUpdates && (
+          <UpdateStatusLine onCheck={onCheckForUpdates} onApply={onApplyUpdate} />
+        )}
       </Stack>
     </AppModal>
   );

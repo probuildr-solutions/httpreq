@@ -8,6 +8,7 @@ import {
   type TerminalSize,
 } from '@httpreq/shared';
 import { resetConnections, useConnectionsStore } from '../connections';
+import { useWorkbenchStore } from '../store';
 import { useSshManager } from './useSsh';
 
 vi.mock('@mantine/notifications', () => ({ notifications: { show: vi.fn() } }));
@@ -142,6 +143,42 @@ describe('useSshManager', () => {
       result.current.onData(sessionId, (data) => written.push(data));
     });
     expect(written).toEqual([]);
+  });
+
+  it('reuses the open tab for a profile instead of opening another', async () => {
+    const harness = createBridge();
+    const { result } = renderHook(() => useSshManager(harness.bridge));
+    const profile = createSshProfile('Prod');
+
+    let first!: string;
+    await act(async () => {
+      first = (await result.current.open(profile))!;
+    });
+    act(() => harness.emit(first, { type: 'status', status: 'connected' }));
+    const tabs = useWorkbenchStore.getState().openSshSessionIds.length;
+
+    // Connected: the tab is focused, and the live shell is left alone.
+    useWorkbenchStore.getState().setActiveSshSession(null);
+    let second!: string | null;
+    await act(async () => {
+      second = await result.current.open(profile);
+    });
+    expect(second).toBe(first);
+    expect(useWorkbenchStore.getState().openSshSessionIds).toHaveLength(tabs);
+    expect(useWorkbenchStore.getState().activeSshSessionId).toBe(first);
+    expect(harness.connects).toHaveLength(1);
+
+    // Disconnected: the same tab connects again, in place.
+    await act(async () => {
+      await result.current.disconnect(first);
+    });
+    await act(async () => {
+      second = await result.current.open(profile);
+    });
+    expect(second).toBe(first);
+    expect(useWorkbenchStore.getState().openSshSessionIds).toHaveLength(tabs);
+    expect(harness.connects).toHaveLength(2);
+    expect(sessionState(first)).toMatchObject({ status: 'connecting', generation: 2 });
   });
 
   it('forgets everything a closed session owned', async () => {
