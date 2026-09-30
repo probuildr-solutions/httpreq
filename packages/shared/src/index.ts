@@ -40,21 +40,80 @@ export interface PreparedRequest {
   options: PreparedOptions;
 }
 
+/** One Server-Sent Event, as assembled from the `event`, `data`, `id` and `retry` fields. */
+export interface SseEvent {
+  /** Position in the stream, from 1. */
+  index: number;
+  /** The `event` field; absent for the default "message" event. */
+  event?: string;
+  /** The `data` lines joined with newlines. */
+  data: string;
+  /** The last event id in effect (`id` field), when the server sent one. */
+  id?: string;
+  /** Reconnection time in milliseconds (`retry` field). */
+  retry?: number;
+  /** Milliseconds since the request was sent. */
+  receivedAt: number;
+}
+
+/** What is known about a streamed response as soon as its headers arrive. */
+export interface StreamHead {
+  status: number;
+  statusText: string;
+  headers: Record<string, string>;
+  contentType: string;
+}
+
 export interface HttpResponse {
   status: number;
   statusText: string;
   headers: Record<string, string>;
+  /**
+   * The body as text. Empty for a binary body (see `binary`), which is never decoded: decoding
+   * would corrupt it and the viewer would show garbage.
+   */
   body: string;
   contentType: string;
   durationMs: number;
   sizeBytes: number;
   /** The body was cut at the request's response size limit. */
   truncated?: boolean;
+  /** The exact bytes received, kept so saving a response never alters it. */
+  bytes?: Uint8Array;
+  /** The body is not text; it can be saved but not shown in the body viewer. */
+  binary?: boolean;
+  /** Set for `text/event-stream` responses: the events received, in order. */
+  stream?: {
+    events: SseEvent[];
+    /** `stopped`: the user stopped an open stream; `closed`: the server ended it. */
+    ended: 'closed' | 'stopped';
+    /** Older events dropped from `events` to bound memory. */
+    dropped: number;
+  };
 }
+
+/**
+ * Progress callbacks for streaming responses. A runtime calls them only when the response is a
+ * stream (`text/event-stream`); ordinary responses never touch them.
+ */
+export interface ExecutionHooks {
+  /** The response headers arrived and the body is a stream that stays open. */
+  onStreamStart?(head: StreamHead): void;
+  /** Events that arrived since the last call. */
+  onStreamEvents?(events: SseEvent[]): void;
+}
+
+/** Messages the desktop main process pushes while a stream is open. */
+export type HttpStreamMessage =
+  { type: 'start'; head: StreamHead } | { type: 'events'; events: SseEvent[] };
 
 export interface HttpRuntime {
   readonly kind: 'browser' | 'electron';
-  execute(request: PreparedRequest, signal?: AbortSignal): Promise<HttpResponse>;
+  execute(
+    request: PreparedRequest,
+    signal?: AbortSignal,
+    hooks?: ExecutionHooks,
+  ): Promise<HttpResponse>;
 }
 
 /**
@@ -177,6 +236,8 @@ export const isMenuCommand = (value: unknown): value is MenuCommand =>
 export interface DesktopWindowState {
   maximized: boolean;
   fullscreen: boolean;
+  /** Electron zoom level of the window; 0 is 100%. */
+  zoomLevel: number;
 }
 
 /** Identity of a build of the app: the same for the web bundle and the desktop app that ships it. */
@@ -238,6 +299,8 @@ export interface WebSocketBridge {
 export interface HttpReqBridge {
   executeHttp(request: PreparedRequest, executionId: string): Promise<IpcResult<HttpResponse>>;
   cancelHttp(executionId: string): void;
+  /** Progress of streaming (SSE) responses, keyed by execution id. */
+  onHttpStream?(listener: (executionId: string, message: HttpStreamMessage) => void): () => void;
   desktop?: DesktopBridge;
   webSocket?: WebSocketBridge;
   ssh?: SshBridge;

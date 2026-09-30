@@ -2,6 +2,7 @@ import {
   AppError,
   type AuthConfig,
   type Environment,
+  type ExecutionHooks,
   type FileReference,
   type HttpRequest,
   type HttpResponse,
@@ -259,19 +260,36 @@ export interface ExecutionResult {
 
 const isAbort = (error: unknown) => error instanceof DOMException && error.name === 'AbortError';
 
-/** Builds, sends (answering one auth challenge if the scheme supports it) and post-processes. */
+/**
+ * Builds, sends (answering one auth challenge if the scheme supports it) and post-processes.
+ *
+ * The request timeout limits the wait for a response. A stream (SSE) is an intentionally open
+ * connection, so the timer stops as soon as its headers arrive; the user ends it with `signal`.
+ */
 export const executeRequest = async (
   request: HttpRequest,
   context: PipelineContext,
   runtime: HttpRuntime,
   signal?: AbortSignal,
+  hooks?: ExecutionHooks,
 ): Promise<ExecutionResult> => {
   const built = await buildRequest(request, context);
   const timeoutMs = request.settings.timeoutMs;
-  const timeout = timeoutMs > 0 ? AbortSignal.timeout(timeoutMs) : undefined;
-  const combined = timeout && signal ? AbortSignal.any([signal, timeout]) : (timeout ?? signal);
+  const timeout = timeoutMs > 0 ? new AbortController() : undefined;
+  const timer = timeout
+    ? setTimeout(() => timeout.abort(new DOMException('Timed out.', 'TimeoutError')), timeoutMs)
+    : undefined;
+  const combined =
+    timeout && signal ? AbortSignal.any([signal, timeout.signal]) : (timeout?.signal ?? signal);
+  const streamHooks: ExecutionHooks = {
+    ...hooks,
+    onStreamStart: (head) => {
+      clearTimeout(timer);
+      hooks?.onStreamStart?.(head);
+    },
+  };
 
-  const send = (prepared: PreparedRequest) => runtime.execute(prepared, combined);
+  const send = (prepared: PreparedRequest) => runtime.execute(prepared, combined, streamHooks);
   try {
     let response = await send(built.prepared);
     const provider = getAuthProvider(built.resolvedAuth);
@@ -289,7 +307,7 @@ export const executeRequest = async (
     return { response, built };
   } catch (error) {
     if (
-      timeout?.aborted &&
+      timeout?.signal.aborted &&
       !signal?.aborted &&
       (isAbort(error) || (error as Error)?.name === 'TimeoutError')
     ) {
@@ -302,5 +320,7 @@ export const executeRequest = async (
       );
     }
     throw error;
+  } finally {
+    clearTimeout(timer);
   }
 };

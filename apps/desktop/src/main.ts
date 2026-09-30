@@ -5,6 +5,7 @@ import {
   Menu,
   nativeTheme,
   net,
+  screen,
   session,
   shell,
   type IpcMainEvent,
@@ -18,6 +19,7 @@ import {
   type AppInfo,
   type DesktopWindowState,
   type HttpResponse,
+  type HttpStreamMessage,
   type IpcResult,
   type MenuCommand,
   type WindowAction,
@@ -25,6 +27,7 @@ import {
 import { executeHttp } from './http';
 import { buildMacMenu } from './menu';
 import { registerServices } from './services';
+import { loadWindowState, resolveWindowBounds, saveWindowState } from './windowState';
 import {
   isAllowedExternalUrl,
   isAuthorizationUrl,
@@ -55,7 +58,7 @@ const contentSecurityPolicy = [
   "worker-src 'self' blob:",
   "style-src 'self' 'unsafe-inline'",
   "font-src 'self' data:",
-  "img-src 'self' data:",
+  "img-src 'self' data: blob:",
   "connect-src 'self' http: https: ws: wss:",
 ].join('; ');
 
@@ -74,6 +77,7 @@ const windowFor = (event: IpcMainEvent | IpcMainInvokeEvent) =>
 const windowState = (window: BrowserWindow): DesktopWindowState => ({
   maximized: window.isMaximized(),
   fullscreen: window.isFullScreen(),
+  zoomLevel: window.webContents.getZoomLevel(),
 });
 
 /**
@@ -108,8 +112,18 @@ ipcMain.handle(
     const controller = new AbortController();
     inFlight.set(key, controller);
     try {
-      return await executeHttp(request, controller.signal, (url, init, options) =>
-        apiSession(options.verifyTls).fetch(url, init),
+      // Streamed (SSE) responses report progress to the window that sent the request.
+      const push = (message: HttpStreamMessage) => {
+        if (!event.sender.isDestroyed()) event.sender.send('http:stream', executionId, message);
+      };
+      return await executeHttp(
+        request,
+        controller.signal,
+        (url, init, options) => apiSession(options.verifyTls).fetch(url, init),
+        {
+          onStreamStart: (head) => push({ type: 'start', head }),
+          onStreamEvents: (events) => push({ type: 'events', events }),
+        },
       );
     } finally {
       if (inFlight.get(key) === controller) inFlight.delete(key);
@@ -178,7 +192,12 @@ const performAction = (window: BrowserWindow, action: WindowAction) => {
 
 ipcMain.on('window:action', (event, action: unknown) => {
   const window = windowFor(event);
-  if (window && isTrustedSender(event) && isWindowAction(action)) performAction(window, action);
+  if (!window || !isTrustedSender(event) || !isWindowAction(action)) return;
+  performAction(window, action);
+  // The zoom level is shown in the renderer (the status bar's Reset Zoom), so tell it the new one.
+  if (action.startsWith('zoom-') && !window.isDestroyed()) {
+    window.webContents.send('window:state-changed', windowState(window));
+  }
 });
 
 ipcMain.on('shell:open-external', (event, url: unknown) => {
@@ -210,12 +229,20 @@ ipcMain.handle('net:check', async (event): Promise<boolean> => {
  */
 const services = registerServices({ isTrustedSender });
 
+const WINDOW_DEFAULTS = { width: 1440, height: 920, minWidth: 900, minHeight: 600 };
+
 const createWindow = async () => {
+  const stateFile = join(app.getPath('userData'), 'window-state.json');
+  const saved = loadWindowState(stateFile);
+  const bounds = resolveWindowBounds(
+    saved,
+    screen.getAllDisplays().map((display) => display.workArea),
+    WINDOW_DEFAULTS,
+  );
   const window = new BrowserWindow({
-    width: 1440,
-    height: 920,
-    minWidth: 900,
-    minHeight: 600,
+    ...bounds,
+    minWidth: WINDOW_DEFAULTS.minWidth,
+    minHeight: WINDOW_DEFAULTS.minHeight,
     title: 'HttpReq',
     icon: isMac ? undefined : windowIcon,
     backgroundColor: windowBackground(),
@@ -235,6 +262,36 @@ const createWindow = async () => {
     },
   });
 
+  // Reopen maximized when it was closed maximized; the restored size is what un-maximizing uses.
+  if (saved?.maximized) window.maximize();
+
+  // The restored rectangle is what is remembered, so a maximized close keeps the normal size too.
+  const persistState = () => {
+    if (window.isDestroyed() || window.isMinimized() || window.isFullScreen()) return;
+    const normal = window.getNormalBounds();
+    saveWindowState(stateFile, {
+      width: normal.width,
+      height: normal.height,
+      x: normal.x,
+      y: normal.y,
+      maximized: window.isMaximized(),
+    });
+  };
+  let persistTimer: NodeJS.Timeout | undefined;
+  const persistSoon = () => {
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(persistState, 400);
+  };
+  window.on('resize', persistSoon);
+  window.on('move', persistSoon);
+  window.on('maximize', persistState);
+  window.on('unmaximize', persistState);
+  // Written synchronously on close, before the window (and its bounds) are gone.
+  window.on('close', () => {
+    clearTimeout(persistTimer);
+    persistState();
+  });
+
   const notifyState = () => {
     if (!window.isDestroyed()) window.webContents.send('window:state-changed', windowState(window));
   };
@@ -242,6 +299,8 @@ const createWindow = async () => {
   window.on('unmaximize', notifyState);
   window.on('enter-full-screen', notifyState);
   window.on('leave-full-screen', notifyState);
+  // Ctrl + mouse wheel zooms without going through a window action.
+  window.webContents.on('zoom-changed', () => setTimeout(notifyState, 0));
 
   // Sockets and shells belong to the window that opened them and die with it.
   const senderId = window.webContents.id;

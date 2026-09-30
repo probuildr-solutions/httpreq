@@ -45,17 +45,27 @@ export const duplicateWorkspace = (workspace: Workspace, name?: string): Workspa
     credentialId: createId(),
   }));
 
+  /** Points an environment link at the copied environment. */
+  const relink = <T extends { environmentId?: string | null }>(item: T): T => {
+    if (!item.environmentId) return item;
+    const { environmentId, ...rest } = item;
+    const copied = remap.ref(environmentId);
+    return (copied ? { ...rest, environmentId: copied } : rest) as T;
+  };
+
   return {
     ...structuredClone(workspace),
     id: createId(),
     name: (name ?? `${workspace.name} (copy)`).trim() || 'Workspace (copy)',
-    collections,
-    folders: folders.map((item) => ({ ...item, parentId: remap.ref(item.parentId)! })),
-    requests: workspace.requests.map((item) => ({
-      ...structuredClone(item),
-      id: remap.next(item.id),
-      parentId: remap.ref(item.parentId),
-    })),
+    collections: collections.map(relink),
+    folders: folders.map((item) => relink({ ...item, parentId: remap.ref(item.parentId)! })),
+    requests: workspace.requests.map((item) =>
+      relink({
+        ...structuredClone(item),
+        id: remap.next(item.id),
+        parentId: remap.ref(item.parentId),
+      }),
+    ),
     websocketRequests: workspace.websocketRequests.map((item) => ({
       ...structuredClone(item),
       id: remap.next(item.id),

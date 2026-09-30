@@ -9,7 +9,17 @@
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
-import { appendFileSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -71,6 +81,85 @@ if (deb) {
     encoding: 'utf8',
   }).trim();
   if (debVersion !== version) errors.push(`${deb} has Version ${debVersion}, expected ${version}.`);
+}
+
+// macOS: an app whose signature does not verify is reported as "damaged" once downloaded, and an
+// arm64 app must contain arm64 code. Check what the user will actually install: the app inside
+// every zip and every dmg (mounted), for the architecture its file name claims.
+if (platform === 'mac') {
+  const run = (command, args) =>
+    execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const archNames = { x64: 'x86_64', arm64: 'arm64' };
+  const signedWithDeveloperId = Boolean(process.env.CSC_LINK || process.env.CSC_NAME);
+
+  const checkApp = (label, appPath, arch) => {
+    try {
+      run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath]);
+    } catch (error) {
+      errors.push(
+        `${label}: the app's code signature is invalid, so macOS would report it as damaged. ${
+          error.stderr ?? error.message
+        }`.trim(),
+      );
+      return;
+    }
+    const executable = join(appPath, 'Contents', 'MacOS', 'HttpReq');
+    const archs = run('lipo', ['-archs', executable]).trim().split(/\s+/);
+    if (!archs.includes(archNames[arch])) {
+      errors.push(`${label}: the executable contains ${archs.join(', ')}, expected ${arch}.`);
+    }
+    if (signedWithDeveloperId) {
+      try {
+        run('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath]);
+        run('xcrun', ['stapler', 'validate', appPath]);
+      } catch (error) {
+        errors.push(`${label}: Gatekeeper or notarization check failed. ${error.stderr ?? ''}`);
+      }
+    } else {
+      const details = run('codesign', ['--display', '--verbose=2', appPath]);
+      const [firstLine] = details.split('\n');
+      console.log(`${label}: ad hoc signed (no Developer ID certificate) ${firstLine}`);
+    }
+  };
+
+  const scratch = mkdtempSync(join(tmpdir(), 'httpreq-verify-'));
+  try {
+    for (const arch of Object.keys(archNames)) {
+      const zip = packages.find((name) => name?.endsWith(`-mac-${arch}.zip`));
+      if (zip) {
+        const target = join(scratch, `zip-${arch}`);
+        run('ditto', ['-x', '-k', join(release, zip), target]);
+        checkApp(zip, join(target, 'HttpReq.app'), arch);
+      }
+      const dmg = packages.find((name) => name?.endsWith(`-mac-${arch}.dmg`));
+      if (dmg) {
+        const mountPoint = join(scratch, `dmg-${arch}`);
+        mkdirSync(mountPoint);
+        try {
+          run('hdiutil', ['verify', join(release, dmg)]);
+          run('hdiutil', [
+            'attach',
+            '-nobrowse',
+            '-readonly',
+            '-mountpoint',
+            mountPoint,
+            join(release, dmg),
+          ]);
+          try {
+            checkApp(dmg, join(mountPoint, 'HttpReq.app'), arch);
+          } finally {
+            run('hdiutil', ['detach', '-force', mountPoint]);
+          }
+        } catch (error) {
+          errors.push(
+            `${dmg}: the disk image could not be verified or mounted. ${error.stderr ?? error.message}`,
+          );
+        }
+      }
+    }
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
 }
 
 if (errors.length > 0) {

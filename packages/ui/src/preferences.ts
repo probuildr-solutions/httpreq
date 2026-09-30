@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { clampZoomLevel } from './webZoom';
 
 export type ResponsePosition = 'right' | 'bottom';
 
@@ -16,6 +17,8 @@ export interface WorkspacePreferences {
   statusBarVisible: boolean;
   /** Whether the Headers tab lists the headers added automatically when a request is sent. */
   generatedHeadersVisible: boolean;
+  /** Page zoom level of the browser build (0 = 100%); the desktop app zooms natively. */
+  zoomLevel: number;
 }
 
 interface PreferencesState extends WorkspacePreferences {
@@ -25,6 +28,7 @@ interface PreferencesState extends WorkspacePreferences {
   setSidebarWidth: (width: number) => void;
   toggleStatusBar: () => void;
   setGeneratedHeadersVisible: (visible: boolean) => void;
+  setZoomLevel: (level: number) => void;
 }
 
 export const PREFERENCES_KEY = 'httpreq.preferences';
@@ -45,6 +49,7 @@ export const defaultPreferences = (): WorkspacePreferences => ({
   sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   statusBarVisible: true,
   generatedHeadersVisible: true,
+  zoomLevel: 0,
 });
 
 export const clampRatio = (ratio: number) =>
@@ -88,6 +93,7 @@ export const parsePreferences = (raw: string | null): WorkspacePreferences => {
       typeof stored.generatedHeadersVisible === 'boolean'
         ? stored.generatedHeadersVisible
         : defaults.generatedHeadersVisible,
+    zoomLevel: isRatio(stored.zoomLevel) ? clampZoomLevel(stored.zoomLevel) : defaults.zoomLevel,
   };
 };
 
@@ -116,6 +122,7 @@ export const usePreferences = create<PreferencesState>((set) => ({
   setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
   toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
   setGeneratedHeadersVisible: (generatedHeadersVisible) => set({ generatedHeadersVisible }),
+  setZoomLevel: (level) => set({ zoomLevel: clampZoomLevel(level) }),
 }));
 
 const snapshot = (state: WorkspacePreferences): WorkspacePreferences => ({
@@ -125,6 +132,7 @@ const snapshot = (state: WorkspacePreferences): WorkspacePreferences => ({
   sidebarWidth: state.sidebarWidth,
   statusBarVisible: state.statusBarVisible,
   generatedHeadersVisible: state.generatedHeadersVisible,
+  zoomLevel: state.zoomLevel,
 });
 
 // Writes are debounced so bursts of changes (e.g. keyboard-resizing the splitter) cost one write.
@@ -147,7 +155,8 @@ usePreferences.subscribe((state, previous) => {
     state.sidebarVisible !== previous.sidebarVisible ||
     state.sidebarWidth !== previous.sidebarWidth ||
     state.statusBarVisible !== previous.statusBarVisible ||
-    state.generatedHeadersVisible !== previous.generatedHeadersVisible
+    state.generatedHeadersVisible !== previous.generatedHeadersVisible ||
+    state.zoomLevel !== previous.zoomLevel
   ) {
     persist(state);
   }

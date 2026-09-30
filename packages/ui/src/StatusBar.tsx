@@ -7,6 +7,7 @@ import {
   IconLoader2,
   IconRouter,
   IconServer,
+  IconZoomReset,
 } from '@tabler/icons-react';
 import { memo } from 'react';
 import { useCapabilities } from './capabilities';
@@ -34,6 +35,10 @@ interface Props {
   runtimeLabel: string;
   version?: string;
   sending: boolean;
+  /** Restores the default zoom: the window's in the desktop app, the page's in the browser. */
+  onResetZoom: () => void;
+  /** The zoom is not the default; the reset control is only shown then. */
+  zoomed: boolean;
   /** Installs or loads an available update (download page, or a reload for the web app). */
   onApplyUpdate?: (update: UpdateInfo) => void;
 }
@@ -67,6 +72,8 @@ export const StatusBar = memo(function StatusBar({
   runtimeLabel,
   version,
   sending,
+  onResetZoom,
+  zoomed,
   onApplyUpdate,
 }: Props) {
   const update = useUpdates((state) => state.update);
@@ -126,6 +133,18 @@ export const StatusBar = memo(function StatusBar({
         )}
       </div>
       <div className={classes.group}>
+        {zoomed && (
+          <button
+            type="button"
+            className={classes.item}
+            aria-label="Reset zoom to 100%"
+            title="Reset zoom to 100%"
+            onClick={onResetZoom}
+          >
+            <IconZoomReset size={14} className={classes.zoomIcon} aria-hidden />
+            Reset Zoom
+          </button>
+        )}
         <button
           type="button"
           className={classes.item}

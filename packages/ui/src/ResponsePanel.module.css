@@ -116,3 +116,134 @@
 .headersPanel td {
   word-break: break-all;
 }
+
+/* ---------- Search in response ---------- */
+
+.searchBar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--hr-chrome-bg);
+}
+
+.searchInput {
+  flex: 0 1 280px;
+  min-width: 120px;
+}
+
+.searchCount {
+  min-width: 64px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.bodyPanel mark,
+.stream mark {
+  border-radius: 2px;
+  background: rgba(245, 159, 0, 0.35);
+  color: inherit;
+}
+
+.stream mark[data-current] {
+  background: rgba(245, 159, 0, 0.8);
+  outline: 1px solid #f59f00;
+}
+
+/* ---------- Download banner and binary responses ---------- */
+
+.download {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+  min-width: 0;
+}
+
+.downloadName {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.binary {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px;
+}
+
+.preview {
+  max-width: 100%;
+  max-height: 220px;
+  object-fit: contain;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: repeating-conic-gradient(
+      light-dark(#eee, #333) 0% 25%,
+      light-dark(#fff, #2a2a2a) 0% 50%
+    )
+    50% / 12px 12px;
+}
+
+/* ---------- Server-Sent Events ---------- */
+
+.stream {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.streamStatus {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.eventList {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  outline: none;
+}
+
+.event {
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
+}
+
+.eventMeta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.eventIndex,
+.eventTime {
+  color: var(--mantine-color-dimmed);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.eventTime {
+  margin-left: auto;
+}
+
+.eventData {
+  margin: 4px 0 0;
+  font-size: 12.5px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}

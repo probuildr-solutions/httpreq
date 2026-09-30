@@ -175,16 +175,22 @@ export function BodyPanel({ request, onChange }: Props) {
             file: null,
             ...patch,
           })}
-          renderRowExtras={(item, update) => (
-            <SegmentedControl
+          // Files cannot be written as `key: value` lines, so the bulk editor is not offered.
+          allowBulkEdit={false}
+          renderType={(item, update) => (
+            <Select
               size="xs"
+              variant="unstyled"
               aria-label={`Type of ${item.key || 'field'}`}
               value={item.kind}
-              onChange={(kind) => update({ kind: kind as MultipartField['kind'] })}
+              allowDeselect={false}
               data={[
                 { value: 'text', label: 'Text' },
                 { value: 'file', label: 'File' },
               ]}
+              onChange={(kind) => kind && update({ kind: kind as MultipartField['kind'] })}
+              comboboxProps={{ withinPortal: true }}
+              styles={{ input: { paddingInline: 8, cursor: 'pointer', fontSize: 12.5 } }}
             />
           )}
           renderValue={(item, update) =>

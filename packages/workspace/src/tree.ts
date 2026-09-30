@@ -59,6 +59,25 @@ export const getAncestors = (workspace: Workspace, id: string): ContainerNode[] 
   return path;
 };
 
+/**
+ * The environment to activate when `id` is selected: the one linked to the request itself, else
+ * the one linked to its nearest folder or collection. `null` when nothing is linked (or the
+ * linked environment no longer exists), which the UI shows as "No environment".
+ */
+export const linkedEnvironmentId = (workspace: Workspace, id: string): string | null => {
+  const self = findNode(workspace, id);
+  if (!self) return null;
+  const chain = [self, ...getAncestors(workspace, id).reverse()];
+  for (const item of chain) {
+    if (item.kind === 'websocket') continue;
+    const linked = item.node.environmentId;
+    if (linked && workspace.environments.some((environment) => environment.id === linked)) {
+      return linked;
+    }
+  }
+  return null;
+};
+
 export const isAncestorOf = (workspace: Workspace, ancestorId: string, id: string) =>
   getAncestors(workspace, id).some((item) => item.node.id === ancestorId);
 

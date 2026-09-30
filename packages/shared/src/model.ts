@@ -181,6 +181,11 @@ export interface HttpRequest {
   settings: RequestSettings;
   scripts: RequestScripts;
   description: string;
+  /**
+   * Environment linked to this request; it is activated whenever the request is selected and
+   * takes precedence over its collection's. Absent or `null` means "use the collection's".
+   */
+  environmentId?: string | null;
 }
 
 export interface Collection {
@@ -188,6 +193,8 @@ export interface Collection {
   name: string;
   description: string;
   auth: AuthConfig;
+  /** Environment activated whenever this collection (or a request in it) is selected. */
+  environmentId?: string | null;
 }
 
 export interface Folder {
@@ -197,6 +204,7 @@ export interface Folder {
   parentId: string;
   description: string;
   auth: AuthConfig;
+  environmentId?: string | null;
 }
 
 export interface EnvironmentVariable {
@@ -284,6 +292,16 @@ export const DEFAULT_REQUEST_SETTINGS: RequestSettings = {
 };
 
 export const createId = () => crypto.randomUUID();
+
+/** A copy of a collection, folder or request linked to `environmentId`, or unlinked for `null`. */
+export const withEnvironmentLink = <T extends { environmentId?: string | null }>(
+  item: T,
+  environmentId: string | null,
+): T => {
+  const copy = { ...item };
+  delete copy.environmentId;
+  return environmentId ? { ...copy, environmentId } : copy;
+};
 
 export const createEmptyBody = (): RequestBody => ({
   mode: 'none',

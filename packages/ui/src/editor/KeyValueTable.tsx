@@ -54,6 +54,8 @@ export interface KeyValueTableProps<T extends KeyValueItem> {
   allowSecret?: boolean;
   showDescription?: boolean;
   allowBulkEdit?: boolean;
+  /** Adds a Type column between Key and Value (e.g. Text / File for multipart fields). */
+  renderType?: (item: T, update: (patch: Partial<T>) => void) => ReactNode;
   /** Replaces the value cell for a row (e.g. a file picker). */
   renderValue?: (item: T, update: (patch: Partial<T>) => void) => ReactNode | undefined;
   /** Extra per-row controls before the row actions (e.g. text/file switch). */
@@ -88,6 +90,7 @@ function KeyValueTableInner<T extends KeyValueItem>({
   allowSecret = false,
   showDescription = true,
   allowBulkEdit = true,
+  renderType,
   renderValue,
   renderRowExtras,
   rowNote,
@@ -162,6 +165,7 @@ function KeyValueTableInner<T extends KeyValueItem>({
         role="table"
         aria-label={label}
         data-description={showDescription || undefined}
+        data-typed={renderType ? true : undefined}
       >
         <div className={classes.header} role="row">
           <span role="columnheader" className={classes.check}>
@@ -177,6 +181,7 @@ function KeyValueTableInner<T extends KeyValueItem>({
             />
           </span>
           <span role="columnheader">Key</span>
+          {renderType && <span role="columnheader">Type</span>}
           <span role="columnheader">Value</span>
           {showDescription && (
             <span role="columnheader" className={classes.description}>
@@ -240,6 +245,7 @@ function KeyValueTableInner<T extends KeyValueItem>({
                   {row.key}
                 </span>
               </span>
+              {renderType && <span role="cell" className={classes.cell} />}
               <span role="cell" className={classes.cell}>
                 <span className={classes.lockedText} title={row.value}>
                   {row.value}
@@ -320,6 +326,11 @@ function KeyValueTableInner<T extends KeyValueItem>({
                   />
                 )}
               </span>
+              {renderType && (
+                <span role="cell" className={classes.cell}>
+                  {renderType(item, patch)}
+                </span>
+              )}
               <span role="cell" className={classes.cell}>
                 {customValue ?? (
                   <VariableInput

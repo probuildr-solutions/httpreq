@@ -29,6 +29,7 @@ import {
   DOCUMENTATION_URL,
   type BuildInfo,
   type DesktopBridge,
+  type ExecutionHooks,
   type HistoryEntry,
   type HistoryRepository,
   type HttpReqBridge,
@@ -36,6 +37,7 @@ import {
   type HttpRuntime,
   type MenuCommand,
   type OAuth2Auth,
+  type SseEvent,
   type WorkspaceRepository,
 } from '@httpreq/shared';
 import { getAncestors } from '@httpreq/workspace';
@@ -84,6 +86,8 @@ import { WorkbenchSplit } from './WorkbenchSplit';
 import { WorkbenchTabs } from './WorkbenchTabs';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { Z_LAYERS } from './zLayers';
+import { SecondaryBar } from './SecondaryBar';
+import { applyWebZoom, nextZoomLevel } from './webZoom';
 import { TitleBar } from './TitleBar';
 import { usePersistence } from './usePersistence';
 import { useRequestExecution } from './useRequestExecution';
@@ -100,6 +104,8 @@ import classes from './HttpReqApp.module.css';
 
 /** Must match the Electron window-controls overlay height (`TITLE_BAR_HEIGHT` in desktop). */
 const TITLE_BAR_HEIGHT = 36;
+/** The workspace row under the title bar. */
+const SECONDARY_BAR_HEIGHT = 32;
 const STATUS_BAR_HEIGHT = 24;
 const NETWORK_ERRORS = new Set(['NETWORK_ERROR', 'DNS_ERROR', 'CONNECTION_TIMEOUT']);
 
@@ -220,9 +226,18 @@ const pipelineContext = (): PipelineContext => {
 };
 
 /** The active request's response, read here so a new response re-renders only this pane. */
-function ActiveResponse({ requestId, loading }: { requestId: string; loading: boolean }) {
+function ActiveResponse({
+  requestId,
+  loading,
+  onStop,
+}: {
+  requestId: string;
+  loading: boolean;
+  onStop: () => void;
+}) {
   const response = useWorkbenchStore((state) => state.responses[requestId]);
-  return <ResponsePanel response={response} loading={loading} />;
+  const stream = useWorkbenchStore((state) => state.streams[requestId]);
+  return <ResponsePanel response={response} stream={stream} loading={loading} onStop={onStop} />;
 }
 
 export function HttpReqApp({
@@ -288,6 +303,26 @@ export function HttpReqApp({
   const setResponsePosition = usePreferences((state) => state.setResponsePosition);
   const toggleSidebar = usePreferences((state) => state.toggleSidebar);
   const toggleStatusBar = usePreferences((state) => state.toggleStatusBar);
+  const zoomLevel = usePreferences((state) => state.zoomLevel);
+  const setZoomLevel = usePreferences((state) => state.setZoomLevel);
+
+  // The desktop app zooms its window natively; the browser build scales the page itself.
+  useEffect(() => {
+    if (!desktop) applyWebZoom(zoomLevel);
+  }, [desktop, zoomLevel]);
+  // The desktop window's zoom lives in Electron; follow it so the status bar knows when to offer
+  // the reset.
+  const [desktopZoom, setDesktopZoom] = useState(0);
+  useEffect(() => {
+    if (!desktop) return;
+    void desktop.getWindowState().then((state) => state && setDesktopZoom(state.zoomLevel));
+    return desktop.onWindowStateChange((state) => setDesktopZoom(state.zoomLevel));
+  }, [desktop]);
+  const zoomed = Math.abs(desktop ? desktopZoom : zoomLevel) > 0.001;
+  const resetZoom = useCallback(() => {
+    if (desktop) desktop.performAction('zoom-reset');
+    else setZoomLevel(0);
+  }, [desktop, setZoomLevel]);
 
   const execution = useRequestExecution();
   const { send: runExecution, cancel: cancelRequest } = execution;
@@ -412,9 +447,25 @@ export function HttpReqApp({
       if (!request) return;
       if (focusResponse) responseRef.current?.focus();
       const context = pipelineContext();
+      // Events of an open stream are shown as they arrive, batched so a fast stream cannot make
+      // the window re-render on every message.
+      const queued: SseEvent[] = [];
+      let flushTimer: ReturnType<typeof setTimeout> | undefined;
+      const flush = () => {
+        flushTimer = undefined;
+        if (queued.length) state.appendStreamEvents(request.id, queued.splice(0));
+      };
+      const hooks: ExecutionHooks = {
+        onStreamStart: (head) => state.startStream(request.id, head),
+        onStreamEvents: (events) => {
+          queued.push(...events);
+          flushTimer ??= setTimeout(flush, 60);
+        },
+      };
       const outcome = await runExecution(request.id, (signal) =>
-        executeRequest(request, context, runtime, signal),
+        executeRequest(request, context, runtime, signal, hooks),
       );
+      clearTimeout(flushTimer);
       const entry: HistoryEntry = {
         id: createId(),
         requestId: request.id,
@@ -431,6 +482,7 @@ export function HttpReqApp({
       if (outcome.kind === 'success') {
         const { response, built } = outcome.value;
         setResponse(request.id, response);
+        state.endStream(request.id);
         reportRequestConnectivity('success');
         recordHistory({
           ...entry,
@@ -452,8 +504,10 @@ export function HttpReqApp({
             message: notes.join(' '),
           });
       } else if (outcome.kind === 'cancelled') {
+        state.endStream(request.id);
         notifications.show({ color: 'yellow', message: 'Request cancelled.' });
       } else {
+        state.endStream(request.id);
         if (outcome.code && NETWORK_ERRORS.has(outcome.code))
           reportRequestConnectivity('network-error');
         recordHistory({ ...entry, error: outcome.message });
@@ -897,7 +951,17 @@ export function HttpReqApp({
         label: 'Toggle Developer Tools',
         run: () => action('toggle-devtools'),
       };
-    } else if (typeof document !== 'undefined' && document.fullscreenEnabled) {
+    } else {
+      // The browser owns Ctrl +/-, so the page zoom has menu commands but no shortcuts.
+      const zoom = (direction: 'in' | 'out' | 'reset') => () =>
+        usePreferences
+          .getState()
+          .setZoomLevel(nextZoomLevel(usePreferences.getState().zoomLevel, direction));
+      map['view.zoom-in'] = { label: 'Zoom In', run: zoom('in') };
+      map['view.zoom-out'] = { label: 'Zoom Out', run: zoom('out') };
+      map['view.zoom-reset'] = { label: 'Reset Zoom', run: zoom('reset') };
+    }
+    if (!desktop && typeof document !== 'undefined' && document.fullscreenEnabled) {
       map['view.fullscreen'] = {
         label: 'Full Screen',
         run: () =>
@@ -989,7 +1053,7 @@ export function HttpReqApp({
             <SshContext.Provider value={ssh}>
               <TunnelContext.Provider value={tunnels}>
                 <AppShell
-                  header={{ height: TITLE_BAR_HEIGHT }}
+                  header={{ height: TITLE_BAR_HEIGHT + SECONDARY_BAR_HEIGHT }}
                   navbar={{
                     width: sidebarWidth,
                     breakpoint: 'sm',
@@ -1001,24 +1065,30 @@ export function HttpReqApp({
                 >
                   {/* Above the navbar (101) so menus drop down over the sidebar; below dialogs. */}
                   <AppShell.Header className={classes.header} zIndex={Z_LAYERS.header}>
-                    <TitleBar
-                      // The workspace name is the centred switcher's job, so the title bar's own
-                      // text is just whatever tab is open.
-                      title={activeName ?? ''}
-                      center={
+                    <div style={{ height: TITLE_BAR_HEIGHT }}>
+                      <TitleBar
+                        // The workspace menu lives in the row below, so the title bar's own text
+                        // is just whatever tab is open.
+                        title={activeName ?? ''}
+                        menus={menus}
+                        commands={commands}
+                        mac={mac}
+                        desktop={desktop}
+                        mobileNavOpened={opened}
+                        onToggleMobileNav={toggle}
+                      />
+                    </div>
+                    <div style={{ height: SECONDARY_BAR_HEIGHT }}>
+                      <SecondaryBar
+                        toggleSidebar={commands['view.toggle-sidebar']}
+                        sidebarVisible={sidebarVisible}
+                      >
                         <WorkspaceSwitcher
                           actions={workspaceActions}
                           releaseConnections={releaseConnections}
                         />
-                      }
-                      menus={menus}
-                      commands={commands}
-                      mac={mac}
-                      desktop={desktop}
-                      sidebarVisible={sidebarVisible}
-                      mobileNavOpened={opened}
-                      onToggleMobileNav={toggle}
-                    />
+                      </SecondaryBar>
+                    </div>
                   </AppShell.Header>
 
                   <AppShell.Navbar className={classes.navbar} aria-label="Sidebar">
@@ -1131,7 +1201,13 @@ export function HttpReqApp({
                               }}
                             />
                           }
-                          response={<ActiveResponse requestId={activeId} loading={sending} />}
+                          response={
+                            <ActiveResponse
+                              requestId={activeId}
+                              loading={sending}
+                              onStop={() => execution.cancel(activeId)}
+                            />
+                          }
                         />
                       </div>
                     ) : (
@@ -1175,6 +1251,8 @@ export function HttpReqApp({
                         runtimeLabel={desktop ? 'Desktop' : 'Browser'}
                         version={version}
                         sending={sending}
+                        onResetZoom={resetZoom}
+                        zoomed={zoomed}
                         onApplyUpdate={applyUpdate}
                       />
                     </AppShell.Footer>
