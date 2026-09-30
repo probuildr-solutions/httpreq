@@ -4,6 +4,7 @@ import {
   AppError,
   isHttpMethod,
   serializeError,
+  type ExecutionHooks,
   type HttpResponse,
   type IpcResult,
   type PreparedBody,
@@ -65,6 +66,7 @@ export const executeHttp = async (
   request: unknown,
   signal: AbortSignal,
   fetchImpl: FetchImplementation,
+  hooks?: ExecutionHooks,
 ): Promise<IpcResult<HttpResponse>> => {
   try {
     if (!isPreparedRequest(request))
@@ -82,7 +84,7 @@ export const executeHttp = async (
     const response = await fetchImpl(url.toString(), toFetchInit(request, signal), request.options);
     return {
       ok: true,
-      value: await readResponse(response, startedAt, request.options.maxResponseBytes),
+      value: await readResponse(response, startedAt, request.options.maxResponseBytes, hooks),
     };
   } catch (error) {
     return {

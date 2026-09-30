@@ -100,7 +100,7 @@ export const applyEnvironment = (
     workspace: {
       ...workspace,
       environments,
-      activeEnvironmentId: workspace.activeEnvironmentId ?? environment.id,
+      activeEnvironmentId: workspace.activeEnvironmentId,
       updatedAt: new Date().toISOString(),
     },
   };

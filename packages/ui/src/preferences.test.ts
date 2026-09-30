@@ -24,6 +24,7 @@ describe('parsePreferences', () => {
       sidebarWidth: 560,
       statusBarVisible: false,
       generatedHeadersVisible: false,
+      zoomLevel: 0,
     });
   });
 

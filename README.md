@@ -78,12 +78,16 @@ npm run version:set -- 0.2.0
 
 A version with a hyphen (`0.2.0-beta.1`) is published as a pre-release, which the desktop app's update check ignores. The release is only created once every platform has built. If any platform fails, or the tag already exists, nothing is published. `npm run release:check` runs the same version checks locally.
 
-Packages are unsigned unless these repository secrets are set: `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` (a base64 `.pfx` Authenticode certificate); `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD` (a base64 Developer ID Application `.p12`); and `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization.
+Packages are unsigned (Windows) or signed ad hoc (macOS) unless these repository secrets are set: `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` (a base64 `.pfx` Authenticode certificate); `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD` (a base64 Developer ID Application `.p12`); and `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization.
+
+### Opening the macOS app
+
+Without a Developer ID certificate the macOS builds are signed ad hoc. That keeps the Apple silicon (arm64) app valid, so macOS no longer reports it as _damaged_, but it is not notarized, so the first launch shows the ordinary "unidentified developer" prompt: open **System Settings › Privacy & Security** and choose **Open Anyway** (or Control-click the app and choose **Open**). If macOS still refuses a quarantined download, `xattr -dr com.apple.quarantine /Applications/HttpReq.app` clears the flag. Set the `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD` and `APPLE_*` secrets to ship a signed and notarized app that opens with no prompt at all; the packaging job then also checks Gatekeeper acceptance and the notarization ticket.
 
 ## Workspaces
 
 A workspace is the top-level container for collections, folders, HTTP and WebSocket requests,
-environments and — on the desktop — SSH and tunnel profiles. The switcher sits in the title bar and
+environments and — on the desktop — SSH and tunnel profiles. The switcher sits in the bar under the title bar and
 can create, rename, duplicate, delete and switch workspaces; the last one used is restored on the
 next start.
 

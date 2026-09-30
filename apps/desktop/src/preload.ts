@@ -5,6 +5,7 @@ import {
   type DesktopBridge,
   type DesktopWindowState,
   type HostKeyPrompt,
+  type HttpStreamMessage,
   type HttpReqBridge,
   type MenuCommand,
   type SshBridge,
@@ -54,12 +55,22 @@ const subscribeKeyed = <T>(
 const isWindowState = (value: unknown): value is DesktopWindowState =>
   !!value &&
   typeof (value as DesktopWindowState).maximized === 'boolean' &&
-  typeof (value as DesktopWindowState).fullscreen === 'boolean';
+  typeof (value as DesktopWindowState).fullscreen === 'boolean' &&
+  typeof (value as DesktopWindowState).zoomLevel === 'number';
 
 const isWebSocketEvent = (value: unknown): value is WebSocketEvent => {
   if (!value || typeof value !== 'object') return false;
   const type = (value as { type?: unknown }).type;
   return type === 'open' || type === 'message' || type === 'close' || type === 'error';
+};
+
+const isHttpStreamMessage = (value: unknown): value is HttpStreamMessage => {
+  if (!value || typeof value !== 'object') return false;
+  const message = value as { type?: unknown; head?: unknown; events?: unknown };
+  return (
+    (message.type === 'start' && !!message.head && typeof message.head === 'object') ||
+    (message.type === 'events' && Array.isArray(message.events))
+  );
 };
 
 const isSshSessionEvent = (value: unknown): value is SshSessionEvent => {
@@ -143,6 +154,7 @@ const tunnels: TunnelBridge = {
 const bridge: HttpReqBridge = {
   executeHttp: (request, executionId) => ipcRenderer.invoke('http:execute', request, executionId),
   cancelHttp: (executionId) => ipcRenderer.send('http:cancel', executionId),
+  onHttpStream: (listener) => subscribeKeyed('http:stream', listener, isHttpStreamMessage),
   desktop,
   webSocket,
   ssh,

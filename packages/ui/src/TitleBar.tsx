@@ -1,11 +1,5 @@
 import { ActionIcon, Burger, Tooltip, UnstyledButton, useComputedColorScheme } from '@mantine/core';
-import {
-  IconLayoutSidebarLeftCollapse,
-  IconLayoutSidebarLeftExpand,
-  IconMoon,
-  IconSettings,
-  IconSun,
-} from '@tabler/icons-react';
+import { IconMoon, IconSettings, IconSun } from '@tabler/icons-react';
 import { useEffect, useState, type ReactNode } from 'react';
 import type { DesktopBridge, DesktopWindowState } from '@httpreq/shared';
 import { AppLogo } from './AppLogo';
@@ -21,7 +15,6 @@ interface Props {
   commands: CommandMap;
   mac: boolean;
   desktop?: DesktopBridge;
-  sidebarVisible: boolean;
   mobileNavOpened: boolean;
   onToggleMobileNav: () => void;
 }
@@ -103,13 +96,13 @@ export function TitleBar({
   commands,
   mac,
   desktop,
-  sidebarVisible,
   mobileNavOpened,
   onToggleMobileNav,
 }: Props) {
   const colorScheme = useComputedColorScheme('dark');
   const [windowState, setWindowState] = useState<DesktopWindowState>({
     maximized: false,
+    zoomLevel: 0,
     fullscreen: false,
   });
 
@@ -119,7 +112,6 @@ export function TitleBar({
     return desktop.onWindowStateChange(setWindowState);
   }, [desktop]);
 
-  const toggleSidebar = commands['view.toggle-sidebar'];
   const toggleTheme = commands['view.toggle-theme'];
   const settings = commands['tools.settings'];
   const about = commands['help.about'];
@@ -165,26 +157,6 @@ export function TitleBar({
 
       <div className={`${classes.side} ${classes.sideEnd}`}>
         <div className={classes.actions}>
-          {toggleSidebar && (
-            <Tooltip label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}>
-              <ActionIcon
-                variant="subtle"
-                color="gray"
-                size="md"
-                radius={0}
-                visibleFrom="sm"
-                aria-label="Toggle sidebar"
-                aria-pressed={sidebarVisible}
-                onClick={toggleSidebar.run}
-              >
-                {sidebarVisible ? (
-                  <IconLayoutSidebarLeftCollapse size={17} />
-                ) : (
-                  <IconLayoutSidebarLeftExpand size={17} />
-                )}
-              </ActionIcon>
-            </Tooltip>
-          )}
           {toggleTheme && (
             <Tooltip label="Toggle color scheme">
               <ActionIcon

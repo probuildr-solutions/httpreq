@@ -18,6 +18,7 @@ import {
   TEXT_CONTENT_TYPES,
   BODY_MODES,
   WORKSPACE_VERSION,
+  withEnvironmentLink,
   type AuthConfig,
   type Collection,
   type Environment,
@@ -73,7 +74,7 @@ export const createDefaultWorkspace = (): Workspace => {
     requests: [request],
     websocketRequests: [],
     environments: [environment],
-    activeEnvironmentId: environment.id,
+    activeEnvironmentId: null,
     sshProfiles: [],
     tunnelProfiles: [],
     openRequestIds: [request.id],
@@ -196,6 +197,9 @@ export const normalizeRequest = (
       tests: str(scripts.tests),
     },
     description: str(value.description),
+    ...(typeof value.environmentId === 'string' && value.environmentId
+      ? { environmentId: value.environmentId }
+      : {}),
   };
 };
 
@@ -301,11 +305,16 @@ export const migrateWorkspace = (
   if (!isObject(value) || typeof value.id !== 'string' || !Array.isArray(value.requests)) {
     return null;
   }
+  const linkOf = (item: Json) =>
+    typeof item.environmentId === 'string' && item.environmentId
+      ? { environmentId: item.environmentId }
+      : {};
   const collections: Collection[] = list(value.collections).map((item) => ({
     id: id(item.id),
     name: str(item.name).trim() || 'Collection',
     description: str(item.description),
     auth: normalizeAuth(item.auth) ?? { type: 'none' },
+    ...linkOf(item),
   }));
   // Keep only folders reachable from a collection (orphaned chains are dropped).
   const reachable = new Set(collections.map((item) => item.id));
@@ -328,6 +337,7 @@ export const migrateWorkspace = (
       parentId: str(item.parentId),
       description: str(item.description),
       auth: normalizeAuth(item.auth) ?? { type: 'inherit' },
+      ...linkOf(item),
     }));
   const liveContainers = new Set([...collections, ...folders].map((item) => item.id));
 
@@ -361,6 +371,11 @@ export const migrateWorkspace = (
     name: str(item.name).trim() || 'Environment',
     variables: list(item.variables).map(normalizeVariable),
   }));
+  const knownEnvironments = new Set(environments.map((item) => item.id));
+  const withKnownLink = <T extends { environmentId?: string | null }>(item: T): T => {
+    if (!item.environmentId || knownEnvironments.has(item.environmentId)) return item;
+    return withEnvironmentLink(item, null);
+  };
   const activeEnvironmentId = environments.some((item) => item.id === value.activeEnvironmentId)
     ? (value.activeEnvironmentId as string)
     : null;
@@ -374,9 +389,9 @@ export const migrateWorkspace = (
     version: WORKSPACE_VERSION,
     id: value.id,
     name: str(value.name).trim() || 'My Workspace',
-    collections,
-    folders,
-    requests,
+    collections: collections.map(withKnownLink),
+    folders: folders.map(withKnownLink),
+    requests: requests.map(withKnownLink),
     websocketRequests,
     environments,
     activeEnvironmentId,

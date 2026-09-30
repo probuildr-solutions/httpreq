@@ -89,3 +89,15 @@
     animation-duration: 0.01ms !important;
   }
 }
+
+/* Matches of the response search in the Monaco viewer (see ResponseViewer). */
+.hr-find-match {
+  background: rgba(245, 159, 0, 0.3);
+  border-radius: 2px;
+}
+
+.hr-find-current {
+  background: rgba(245, 159, 0, 0.75);
+  outline: 1px solid #f59f00;
+  border-radius: 2px;
+}

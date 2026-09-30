@@ -1,0 +1,12 @@
+/* A light rule above and below, so the bar reads as its own row, distinct from the title bar. */
+.bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 100%;
+  padding: 0 8px;
+  box-sizing: border-box;
+  border-block: 1px solid light-dark(var(--mantine-color-gray-4), var(--mantine-color-dark-3));
+  background: var(--hr-chrome-bg);
+  user-select: none;
+}

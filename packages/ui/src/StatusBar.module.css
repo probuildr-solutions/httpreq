@@ -114,3 +114,8 @@
   color: var(--mantine-color-violet-text);
   font-weight: 600;
 }
+
+/* The zoom-reset glyph keeps a colour of its own, so it stays visible against the bar. */
+.zoomIcon {
+  color: var(--mantine-color-cyan-5);
+}

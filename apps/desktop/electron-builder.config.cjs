@@ -12,6 +12,12 @@ const electronVersion = require('electron/package.json').version;
  */
 const { version } = require('../../package.json');
 
+/**
+ * A Developer ID certificate is available (CI passes it as CSC_LINK; locally CSC_NAME picks one
+ * from the keychain). Without one the mac build is signed ad hoc, see `mac` below.
+ */
+const hasDeveloperId = Boolean(process.env.CSC_LINK || process.env.CSC_NAME);
+
 /** @type {import('electron-builder').Configuration} */
 module.exports = {
   appId: 'dev.httpreq.desktop',
@@ -56,9 +62,22 @@ module.exports = {
       { target: 'dmg', arch: ['x64', 'arm64'] },
       { target: 'zip', arch: ['x64', 'arm64'] },
     ],
-    // Required for notarization. The entitlements let Electron's V8 JIT run and load the
-    // unsigned native modules that ssh2 ships (cpu-features, sshcrypto).
-    hardenedRuntime: true,
+    // Signing. With a Developer ID certificate the app is signed with it and notarized (the
+    // APPLE_* variables), which is the only way to open without any Gatekeeper prompt.
+    //
+    // Without one it is still signed, ad hoc (`identity: '-'`). That is not optional on Apple
+    // silicon: packaging rewrites Electron's Info.plist and resources, which invalidates the
+    // signature the prebuilt arm64 binaries ship with, and an arm64 app whose signature no longer
+    // verifies is reported by macOS as "damaged and can't be opened" once it has been downloaded
+    // (quarantined). electron-builder skipped signing entirely in that case, which is what shipped
+    // broken arm64 apps. An ad hoc signature makes the bundle internally consistent, so macOS shows
+    // the ordinary "unidentified developer" prompt (System Settings > Privacy & Security > Open
+    // Anyway) instead. Notarization needs a Developer ID, so it is off for ad hoc builds.
+    ...(hasDeveloperId ? {} : { identity: '-', notarize: false }),
+    // Required for notarization only. The entitlements let Electron's V8 JIT run and load the
+    // unsigned native modules that ssh2 ships (cpu-features, sshcrypto); an ad hoc signature
+    // cannot satisfy library validation, so the hardened runtime is off there.
+    hardenedRuntime: hasDeveloperId,
     gatekeeperAssess: false,
     entitlements: 'build/entitlements.mac.plist',
     entitlementsInherit: 'build/entitlements.mac.plist',

@@ -6,6 +6,7 @@ import {
   createFolder,
   createId,
   deepEqual,
+  withEnvironmentLink,
   createSshProfile as newSshProfile,
   createTunnelProfile as newTunnelProfile,
   createWebSocketRequest as newSocketRequest,
@@ -14,6 +15,8 @@ import {
   type HistoryEntry,
   type HttpRequest,
   type HttpResponse,
+  type SseEvent,
+  type StreamHead,
   type RequestKind,
   type SshProfile,
   type TunnelProfile,
@@ -29,6 +32,7 @@ import {
   getAncestors,
   insertLeafCopy,
   isLeafNode,
+  linkedEnvironmentId,
   moveNode as moveTreeNode,
   renameNode as renameTreeNode,
 } from '@httpreq/workspace';
@@ -69,6 +73,8 @@ interface WorkbenchState {
   drafts: Record<string, HttpRequest>;
   activeRequestId: string | null;
   responses: Record<string, HttpResponse | undefined>;
+  /** Streams (SSE) that are open right now, keyed by request id; gone once the stream ends. */
+  streams: Record<string, LiveStream | undefined>;
   saveStatus: Record<string, SaveStatus | undefined>;
   history: HistoryEntry[];
   /* Explorer state (ephemeral). */
@@ -122,6 +128,9 @@ interface WorkbenchState {
   ) => void;
   setSaveStatus: (id: string, status: SaveStatus | undefined) => void;
   setResponse: (id: string, response: HttpResponse) => void;
+  startStream: (id: string, head: StreamHead) => void;
+  appendStreamEvents: (id: string, events: SseEvent[]) => void;
+  endStream: (id: string) => void;
   setEditorTab: (id: string, tab: EditorTab) => void;
   /* Tree */
   createCollection: () => string;
@@ -165,6 +174,11 @@ interface WorkbenchState {
   /** Deletes several environments in one change, closing their tabs. */
   deleteEnvironments: (ids: Iterable<string>) => void;
   setActiveEnvironment: (id: string | null) => void;
+  /**
+   * Links an environment to a collection, folder or request (`null` unlinks), then re-derives the
+   * active environment for the current selection.
+   */
+  linkEnvironment: (id: string, environmentId: string | null) => void;
   /** Creates or updates a variable in the active environment (e.g. a retrieved OAuth token). */
   setEnvironmentVariable: (key: string, value: string, secret: boolean) => boolean;
   /* Environment editor tabs */
@@ -213,6 +227,30 @@ const touch = (workspace: Workspace, patch: Partial<Workspace>): Workspace => ({
 
 const same = (a: HttpRequest, b: HttpRequest) => deepEqual(a, b);
 
+/**
+ * Structural fields (name, parent, linked environment) belong to the saved request and are
+ * changed through tree actions only, so an edited copy always takes them from the saved one.
+ */
+const withStructure = (edited: HttpRequest, saved: HttpRequest): HttpRequest => {
+  return withEnvironmentLink(
+    { ...edited, id: saved.id, name: saved.name, parentId: saved.parentId },
+    saved.environmentId ?? null,
+  );
+};
+
+/**
+ * Makes the environment linked to `id` (its own, else its collection's) the active one, or none
+ * when nothing is linked, so the environment shown always belongs to what is selected. This is
+ * derived from the selection and deliberately does not touch `updatedAt`.
+ */
+const activateFor = (workspace: Workspace, id: string | null): Workspace => {
+  if (!id) return workspace;
+  const linked = linkedEnvironmentId(workspace, id);
+  return linked === workspace.activeEnvironmentId
+    ? workspace
+    : { ...workspace, activeEnvironmentId: linked };
+};
+
 /** The version of a request the editor shows: its draft if it has unsaved edits. */
 export const editableRequest = (
   state: Pick<WorkbenchState, 'workspace' | 'drafts'>,
@@ -221,6 +259,17 @@ export const editableRequest = (
   id
     ? (state.drafts[id] ?? state.workspace.requests.find((request) => request.id === id))
     : undefined;
+
+/** An open Server-Sent Events stream, shown while it is still receiving. */
+export interface LiveStream {
+  head: StreamHead;
+  events: SseEvent[];
+  /** Older events dropped to bound memory. */
+  dropped: number;
+}
+
+/** Most events a live stream keeps on screen; matches what the transport keeps for the result. */
+const MAX_LIVE_EVENTS = 10_000;
 
 export const activeEnvironment = (workspace: Workspace) =>
   workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId) ??
@@ -273,6 +322,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   drafts: {},
   activeRequestId: initial.openRequestIds[0] ?? null,
   responses: {},
+  streams: {},
   saveStatus: {},
   history: [],
   selectedNodeId: null,
@@ -294,17 +344,18 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         .filter(([id]) => requestIds.has(id))
         .map(([id, draft]) => {
           const saved = workspace.requests.find((request) => request.id === id)!;
-          return [id, { ...draft, name: saved.name, parentId: saved.parentId }];
+          return [id, withStructure(draft, saved)];
         }),
     );
     const active = workspace.openRequestIds[0] ?? null;
     set({
-      workspace,
+      workspace: activateFor(workspace, active),
       drafts: liveDrafts,
       history,
       switching: false,
       activeRequestId: active,
       responses: {},
+      streams: {},
       saveStatus: {},
       // Terminals belong to the workspace that opened them and do not survive a switch.
       openSshSessionIds: [],
@@ -336,12 +387,17 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       if (!requestKind(state.workspace, id)) return state;
       const open = state.workspace.openRequestIds;
       if (open.includes(id))
-        return { activeRequestId: id, selectedNodeId: id, activeEnvironmentTabId: null };
+        return {
+          workspace: activateFor(state.workspace, id),
+          activeRequestId: id,
+          selectedNodeId: id,
+          activeEnvironmentTabId: null,
+        };
       const index = state.activeRequestId ? open.indexOf(state.activeRequestId) : -1;
       const openRequestIds = [...open];
       openRequestIds.splice(index >= 0 ? index + 1 : open.length, 0, id);
       return {
-        workspace: touch(state.workspace, { openRequestIds }),
+        workspace: activateFor(touch(state.workspace, { openRequestIds }), id),
         activeRequestId: id,
         selectedNodeId: id,
         activeEnvironmentTabId: null,
@@ -378,20 +434,21 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         active !== null && nextActive === null && !state.activeSshSessionId
           ? (state.openEnvironmentTabIds[0] ?? null)
           : null;
+      const closed = touch(state.workspace, {
+        openRequestIds,
+        ...(dropped.size
+          ? { requests: state.workspace.requests.filter((request) => !dropped.has(request.id)) }
+          : {}),
+        ...(droppedSockets.size
+          ? {
+              websocketRequests: state.workspace.websocketRequests.filter(
+                (request) => !droppedSockets.has(request.id),
+              ),
+            }
+          : {}),
+      });
       return {
-        workspace: touch(state.workspace, {
-          openRequestIds,
-          ...(dropped.size
-            ? { requests: state.workspace.requests.filter((request) => !dropped.has(request.id)) }
-            : {}),
-          ...(droppedSockets.size
-            ? {
-                websocketRequests: state.workspace.websocketRequests.filter(
-                  (request) => !droppedSockets.has(request.id),
-                ),
-              }
-            : {}),
-        }),
+        workspace: activateFor(closed, nextActive),
         drafts: without(state.drafts, closing),
         saveStatus: without(state.saveStatus, closing),
         activeRequestId: nextActive,
@@ -400,11 +457,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     }),
 
   setActiveRequest: (activeRequestId) =>
-    set({
+    set((state) => ({
+      workspace: activateFor(state.workspace, activeRequestId),
       activeRequestId,
       selectedNodeId: activeRequestId,
       ...(activeRequestId ? { activeEnvironmentTabId: null } : {}),
-    }),
+    })),
 
   cycleRequest: (offset) =>
     set((state) => {
@@ -413,7 +471,12 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       const index = state.activeRequestId ? open.indexOf(state.activeRequestId) : 0;
       const next = open[(((index + offset) % open.length) + open.length) % open.length];
       return next
-        ? { activeRequestId: next, selectedNodeId: next, activeEnvironmentTabId: null }
+        ? {
+            workspace: activateFor(state.workspace, next),
+            activeRequestId: next,
+            selectedNodeId: next,
+            activeEnvironmentTabId: null,
+          }
         : state;
     }),
 
@@ -434,13 +497,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       if (!saved) return state;
       const base = state.drafts[id] ?? saved;
       // Structural fields are changed through tree actions only.
-      const next: HttpRequest = {
-        ...base,
-        ...patch,
-        id,
-        name: saved.name,
-        parentId: saved.parentId,
-      };
+      const next = withStructure({ ...base, ...patch }, saved);
       if (same(next, saved)) {
         return state.drafts[id] ? { drafts: without(state.drafts, [id]) } : state;
       }
@@ -465,9 +522,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
           ? written
           : touch(state.workspace, {
               requests: state.workspace.requests.map((request) =>
-                request.id === committed.id
-                  ? { ...committed, name: request.name, parentId: request.parentId }
-                  : request,
+                request.id === committed.id ? withStructure(committed, request) : request,
               ),
             });
       const current = state.drafts[committed.id];
@@ -485,6 +540,30 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
 
   setResponse: (id, response) =>
     set((state) => ({ responses: { ...state.responses, [id]: response } })),
+
+  startStream: (id, head) =>
+    set((state) => ({ streams: { ...state.streams, [id]: { head, events: [], dropped: 0 } } })),
+
+  appendStreamEvents: (id, events) =>
+    set((state) => {
+      const live = state.streams[id];
+      if (!live || events.length === 0) return state;
+      const all = [...live.events, ...events];
+      const overflow = Math.max(0, all.length - MAX_LIVE_EVENTS);
+      return {
+        streams: {
+          ...state.streams,
+          [id]: {
+            head: live.head,
+            events: overflow ? all.slice(overflow) : all,
+            dropped: live.dropped + overflow,
+          },
+        },
+      };
+    }),
+
+  endStream: (id) =>
+    set((state) => (state.streams[id] ? { streams: without(state.streams, [id]) } : state)),
 
   setEditorTab: (id, tab) => set((state) => ({ editorTabs: { ...state.editorTabs, [id]: tab } })),
 
@@ -686,7 +765,11 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     if (kind === 'request') get().openRequest(rootId);
   },
 
-  selectNode: (selectedNodeId) => set({ selectedNodeId }),
+  selectNode: (selectedNodeId) =>
+    set((state) => ({
+      workspace: activateFor(state.workspace, selectedNodeId),
+      selectedNodeId,
+    })),
 
   toggleExpanded: (id, expanded) =>
     set((state) => {
@@ -699,6 +782,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
 
   revealNode: (id) =>
     set((state) => ({
+      workspace: activateFor(state.workspace, id),
       selectedNodeId: id,
       sidebarView: 'collections',
       expandedIds: withExpanded(
@@ -717,7 +801,6 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     set((state) => ({
       workspace: touch(state.workspace, {
         environments: [...state.workspace.environments, environment],
-        activeEnvironmentId: state.workspace.activeEnvironmentId ?? environment.id,
       }),
     }));
     return environment.id;
@@ -753,6 +836,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     const doomed = new Set(ids);
     if (doomed.size === 0) return;
     get().closeEnvironmentTabs(doomed);
+    /** Drops a link to a deleted environment. */
+    const unlink = <T extends { environmentId?: string | null }>(item: T): T =>
+      item.environmentId && doomed.has(item.environmentId) ? withEnvironmentLink(item, null) : item;
     set((state) => {
       const activeId = state.workspace.activeEnvironmentId;
       return {
@@ -760,14 +846,40 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
           environments: state.workspace.environments.filter(
             (environment) => !doomed.has(environment.id),
           ),
+          collections: state.workspace.collections.map(unlink),
+          folders: state.workspace.folders.map(unlink),
+          requests: state.workspace.requests.map(unlink),
           activeEnvironmentId: activeId && doomed.has(activeId) ? null : activeId,
         }),
+        drafts: Object.fromEntries(
+          Object.entries(state.drafts).map(([draftId, draft]) => [draftId, unlink(draft)]),
+        ),
       };
     });
   },
 
   setActiveEnvironment: (activeEnvironmentId) =>
     set((state) => ({ workspace: touch(state.workspace, { activeEnvironmentId }) })),
+
+  linkEnvironment: (id, environmentId) =>
+    set((state) => {
+      const link = <T extends { id: string; environmentId?: string | null }>(items: T[]) =>
+        items.map((item) => (item.id === id ? withEnvironmentLink(item, environmentId) : item));
+      const draft = state.drafts[id];
+      const workspace = touch(state.workspace, {
+        collections: link(state.workspace.collections),
+        folders: link(state.workspace.folders),
+        requests: link(state.workspace.requests),
+        // The environment chosen for what is selected is also the active one right away.
+        activeEnvironmentId: environmentId,
+      });
+      return {
+        workspace: activateFor(workspace, state.activeRequestId ?? state.selectedNodeId),
+        drafts: draft
+          ? { ...state.drafts, [id]: withEnvironmentLink(draft, environmentId) }
+          : state.drafts,
+      };
+    }),
 
   setEnvironmentVariable: (key, value, secret) => {
     const environment = activeEnvironment(get().workspace);

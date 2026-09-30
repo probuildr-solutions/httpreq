@@ -23,6 +23,14 @@
   --kv-columns: 30px minmax(110px, 1fr) minmax(130px, 1.3fr) minmax(90px, 1fr) auto;
 }
 
+.table[data-typed] {
+  --kv-columns: 30px minmax(110px, 1fr) 84px minmax(140px, 1.4fr) auto;
+}
+
+.table[data-typed][data-description] {
+  --kv-columns: 30px minmax(100px, 1fr) 84px minmax(130px, 1.3fr) minmax(90px, 1fr) auto;
+}
+
 .header,
 .row {
   display: contents;
@@ -32,6 +40,10 @@
 @container request-editor (max-width: 620px) {
   .table[data-description] {
     --kv-columns: 30px minmax(90px, 1fr) minmax(110px, 1.4fr) auto;
+  }
+
+  .table[data-typed][data-description] {
+    --kv-columns: 30px minmax(90px, 1fr) 84px minmax(110px, 1.4fr) auto;
   }
 
   .description {

@@ -51,15 +51,24 @@ export const exportCollection = (workspace: Workspace, collectionId: string) => 
   };
 };
 
+/**
+ * Saves bytes as a file through the browser's (or Electron's) download handling, which asks where
+ * to put it. The bytes are written as they are, so binary content is never altered.
+ */
+export const downloadBytes = (fileName: string, bytes: Uint8Array, type: string) =>
+  saveBlob(fileName, new Blob([bytes as BlobPart], { type: type || 'application/octet-stream' }));
+
 /** Saves text as a file through the browser's (or Electron's) download handling. */
-export const downloadText = (fileName: string, text: string, type: string) => {
-  const blob = new Blob([text], { type });
+export const downloadText = (fileName: string, text: string, type: string) =>
+  saveBlob(fileName, new Blob([text], { type }));
+
+const saveBlob = (fileName: string, blob: Blob) => {
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
   anchor.download = fileName;
   anchor.click();
-  setTimeout(() => URL.revokeObjectURL(url), 0);
+  setTimeout(() => URL.revokeObjectURL(url), 30_000);
 };
 
 /** Gives every imported entity a new id, keeping the references between them. */

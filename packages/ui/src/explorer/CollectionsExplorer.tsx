@@ -905,6 +905,20 @@ const ExplorerRow = memo(function ExplorerRow({
             </ActionIcon>
           </Tooltip>
         )}
+        {container && (
+          <Tooltip label="New folder">
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="xs"
+              tabIndex={-1}
+              aria-label={`New folder in ${row.name}`}
+              onClick={() => handlers.newFolder(row.id)}
+            >
+              <IconFolderPlus size={13} />
+            </ActionIcon>
+          </Tooltip>
+        )}
         <Menu
           opened={menuOpen}
           onChange={(opened) => handlers.menuChange(row.id, opened)}

@@ -193,6 +193,7 @@ describe('workbench store', () => {
   });
 
   it('stores retrieved tokens in the active environment as secrets', () => {
+    state().setActiveEnvironment(state().workspace.environments[0]!.id);
     expect(state().setEnvironmentVariable('accessToken', 'tok', true)).toBe(true);
     const variable = state().workspace.environments[0]!.variables.find(
       (item) => item.key === 'accessToken',
@@ -200,6 +201,51 @@ describe('workbench store', () => {
     expect(variable).toMatchObject({ value: 'tok', secret: true, enabled: true });
     state().setActiveEnvironment(null);
     expect(state().setEnvironmentVariable('accessToken', 'x', true)).toBe(false);
+  });
+
+  describe('environment links', () => {
+    const setup = () => {
+      const [staging, production] = [state().createEnvironment(), state().createEnvironment()];
+      const collectionId = state().workspace.collections[0]!.id;
+      const linked = state().createRequest(collectionId);
+      const inherited = state().createRequest(collectionId);
+      const loose = state().createRequest(null);
+      return { staging, production, collectionId, linked, inherited, loose };
+    };
+
+    it('does not select an environment by default', () => {
+      state().createEnvironment();
+      expect(state().workspace.activeEnvironmentId).toBeNull();
+    });
+
+    it('activates the environment linked to the selected collection or request', () => {
+      const { staging, production, collectionId, linked, inherited, loose } = setup();
+      state().linkEnvironment(collectionId, staging);
+      state().linkEnvironment(linked, production);
+
+      state().selectNode(collectionId);
+      expect(state().workspace.activeEnvironmentId).toBe(staging);
+      state().setActiveRequest(linked);
+      expect(state().workspace.activeEnvironmentId).toBe(production);
+      // A request without a link of its own follows its collection.
+      state().setActiveRequest(inherited);
+      expect(state().workspace.activeEnvironmentId).toBe(staging);
+      // Nothing linked: back to "No environment", not the previously selected one.
+      state().setActiveRequest(loose);
+      expect(state().workspace.activeEnvironmentId).toBeNull();
+    });
+
+    it('keeps an edit from changing the request link, and unlinks deleted environments', () => {
+      const { staging, linked } = setup();
+      state().linkEnvironment(linked, staging);
+      state().editRequest(linked, { url: 'https://example.test' });
+      expect(state().drafts[linked]?.environmentId).toBe(staging);
+      state().deleteEnvironment(staging);
+      expect(state().workspace.requests.find((item) => item.id === linked)?.environmentId).toBe(
+        undefined,
+      );
+      expect(state().workspace.activeEnvironmentId).toBeNull();
+    });
   });
 
   describe('environment tabs', () => {

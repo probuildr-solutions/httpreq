@@ -1,4 +1,4 @@
-import { Button, Stack, Textarea, TextInput } from '@mantine/core';
+import { Button, Select, Stack, Textarea, TextInput } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { resolveInheritedAuth } from '@httpreq/api-client';
 import { findNode } from '@httpreq/workspace';
@@ -21,8 +21,10 @@ export function ContainerSettingsDialog({
   const updateContainer = useWorkbenchStore((state) => state.updateContainer);
   const renameNode = useWorkbenchStore((state) => state.renameNode);
   const revealNode = useWorkbenchStore((state) => state.revealNode);
+  const linkEnvironment = useWorkbenchStore((state) => state.linkEnvironment);
   const found = nodeId ? findNode(workspace, nodeId) : undefined;
-  const node = found && found.kind !== 'request' ? found : undefined;
+  const node =
+    found && (found.kind === 'collection' || found.kind === 'folder') ? found : undefined;
   const [name, setName] = useState('');
 
   useEffect(() => {
@@ -69,6 +71,19 @@ export function ContainerSettingsDialog({
           autosize
           minRows={2}
           maxRows={6}
+        />
+        <Select
+          label="Environment"
+          description={`Activated whenever this ${kind} or a request in it is selected. A request can link its own environment instead.`}
+          placeholder="No environment"
+          clearable
+          value={node.node.environmentId ?? null}
+          data={workspace.environments.map((environment) => ({
+            value: environment.id,
+            label: environment.name,
+          }))}
+          onChange={(value) => linkEnvironment(node.node.id, value)}
+          comboboxProps={{ withinPortal: true }}
         />
         <AuthorizationPanel
           auth={node.node.auth}

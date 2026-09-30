@@ -23,6 +23,15 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
   const environments = useWorkbenchStore((state) => state.workspace.environments);
   const activeId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
   const setActive = useWorkbenchStore((state) => state.setActiveEnvironment);
+  const linkEnvironment = useWorkbenchStore((state) => state.linkEnvironment);
+  // What a choice is linked to: the open request, else the selected collection or folder.
+  const linkTarget = useWorkbenchStore((state) => {
+    const id = state.activeRequestId ?? state.selectedNodeId;
+    // WebSocket requests cannot be linked to an environment.
+    return id && !state.workspace.websocketRequests.some((socket) => socket.id === id) ? id : null;
+  });
+  const choose = (environmentId: string | null) =>
+    linkTarget ? linkEnvironment(linkTarget, environmentId) : setActive(environmentId);
   const active = environments.find((environment) => environment.id === activeId);
   const label = active?.name ?? 'No environment';
 
@@ -48,11 +57,11 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
         </UnstyledButton>
       </Menu.Target>
       <Menu.Dropdown>
-        <Menu.Label>Active environment</Menu.Label>
+        <Menu.Label>Environment for this request</Menu.Label>
         <Menu.Item
           leftSection={check(!active)}
           aria-current={!active ? 'true' : undefined}
-          onClick={() => setActive(null)}
+          onClick={() => choose(null)}
         >
           <span className={classes.itemName}>No environment</span>
         </Menu.Item>
@@ -61,7 +70,7 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
             key={environment.id}
             leftSection={check(environment.id === active?.id)}
             aria-current={environment.id === active?.id ? 'true' : undefined}
-            onClick={() => setActive(environment.id)}
+            onClick={() => choose(environment.id)}
           >
             <span className={classes.itemName}>{environment.name}</span>
           </Menu.Item>

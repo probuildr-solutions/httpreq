@@ -221,4 +221,37 @@ describe('executeRequest', () => {
       ),
     ).rejects.toMatchObject({ code: 'CONNECTION_TIMEOUT' });
   });
+
+  it('does not time out an open event stream, and the user can still stop it', async () => {
+    const stop = new AbortController();
+    const head = { status: 200, statusText: 'OK', headers: {}, contentType: 'text/event-stream' };
+    const execute: HttpRuntime['execute'] = (_request, signal, hooks) =>
+      new Promise((resolve, reject) => {
+        // Headers arrive, then the stream stays open well past the 10 ms request timeout.
+        hooks?.onStreamStart?.(head);
+        signal?.addEventListener('abort', () =>
+          signal.reason?.name === 'TimeoutError'
+            ? reject(new DOMException('Timed out', 'TimeoutError'))
+            : resolve(ok({ ...head, stream: { events: [], ended: 'stopped', dropped: 0 } })),
+        );
+      });
+    const request: HttpRequest = {
+      ...createEmptyRequest(),
+      url: 'https://example.com/events',
+      settings: { ...createEmptyRequest().settings, timeoutMs: 10 },
+    };
+    const started = vi.fn();
+    const pending = executeRequest(
+      request,
+      { workspace: createDefaultWorkspace(), environment: null },
+      { kind: 'browser', execute },
+      stop.signal,
+      { onStreamStart: started },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    stop.abort();
+    const result = await pending;
+    expect(started).toHaveBeenCalledWith(head);
+    expect(result.response.stream?.ended).toBe('stopped');
+  });
 });

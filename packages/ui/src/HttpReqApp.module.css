@@ -1,10 +1,17 @@
 .header {
-  border-bottom: 1px solid var(--mantine-color-default-border);
+  /* The secondary bar draws the header's bottom rule itself. */
   background: var(--hr-titlebar-bg);
   overflow: visible;
 }
 
 .navbar {
+  /* The shell sizes the navbar from `100dvh`, which CSS zoom does not scale (see `.main`). */
+  height: calc(
+    100dvh / var(--hr-zoom, 1) - var(--app-shell-header-offset, 0px) -
+      var(--app-shell-footer-offset, 0px)
+  ) !important;
+  /* Only the slide-in animates: a zoom change resizes the navbar and must not animate that. */
+  transition-property: transform, translate;
   background: var(--hr-chrome-bg);
 }
 
@@ -36,7 +43,8 @@
 .main {
   display: flex;
   flex-direction: column;
-  height: 100dvh;
+  /* CSS zoom does not scale viewport units, so the full height is divided by the zoom factor. */
+  height: calc(100dvh / var(--hr-zoom, 1));
   min-height: 0;
   overflow: hidden;
   background: var(--mantine-color-body);

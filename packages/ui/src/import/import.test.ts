@@ -235,8 +235,8 @@ describe('applying imports', () => {
       'merge',
     );
     expect(created.message).toBe('Created environment “Dev” with 1 variable');
-    // The first imported environment becomes the active one.
-    expect(created.workspace.activeEnvironmentId).toBe(created.environment.id);
+    // No environment is selected on its own: one is only active through a link or a choice.
+    expect(created.workspace.activeEnvironmentId).toBeNull();
 
     const incoming = {
       name: 'dev',
