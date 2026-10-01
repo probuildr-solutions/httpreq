@@ -1,13 +1,18 @@
 {
-  "name": "@httpreq/storage",
-  "version": "0.3.0",
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "dependencies": {
-    "@httpreq/shared": "*",
-    "@httpreq/workspace": "*",
-    "@httpreq/api-client": "*"
-  }
+    "name": "@httpreq/storage",
+    "version": "0.3.0",
+    "author": {
+        "name": "Yamatri Reddy",
+        "email": "yamatrireddy94@gmail.com"
+    },
+    "license": "GPL-3.0-only",
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "dependencies": {
+        "@httpreq/shared": "*",
+        "@httpreq/workspace": "*",
+        "@httpreq/api-client": "*"
+    }
 }

@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
 import { createId, type KeyValueItem } from '@httpreq/shared';
 
 /**
@@ -7,40 +12,40 @@ import { createId, type KeyValueItem } from '@httpreq/shared';
  */
 
 export interface SplitUrl {
-  base: string;
-  query: string | null;
-  hash: string;
+    base: string;
+    query: string | null;
+    hash: string;
 }
 
 export const splitUrl = (url: string): SplitUrl => {
-  const hashIndex = url.indexOf('#');
-  const hash = hashIndex >= 0 ? url.slice(hashIndex) : '';
-  const beforeHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
-  const queryIndex = beforeHash.indexOf('?');
-  return queryIndex >= 0
-    ? { base: beforeHash.slice(0, queryIndex), query: beforeHash.slice(queryIndex + 1), hash }
-    : { base: beforeHash, query: null, hash };
+    const hashIndex = url.indexOf('#');
+    const hash = hashIndex >= 0 ? url.slice(hashIndex) : '';
+    const beforeHash = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+    const queryIndex = beforeHash.indexOf('?');
+    return queryIndex >= 0
+        ? { base: beforeHash.slice(0, queryIndex), query: beforeHash.slice(queryIndex + 1), hash }
+        : { base: beforeHash, query: null, hash };
 };
 
 export const parseQuery = (query: string): { key: string; value: string }[] =>
-  query
-    .split('&')
-    .filter((pair) => pair.length > 0)
-    .map((pair) => {
-      const equals = pair.indexOf('=');
-      return equals >= 0
-        ? { key: pair.slice(0, equals), value: pair.slice(equals + 1) }
-        : { key: pair, value: '' };
-    });
+    query
+        .split('&')
+        .filter((pair) => pair.length > 0)
+        .map((pair) => {
+            const equals = pair.indexOf('=');
+            return equals >= 0
+                ? { key: pair.slice(0, equals), value: pair.slice(equals + 1) }
+                : { key: pair, value: '' };
+        });
 
 // Only characters that would change the query's structure are escaped when rebuilding.
 const escapeKey = (text: string) => text.replace(/[&#=]/g, (char) => encodeURIComponent(char));
 const escapeValue = (text: string) => text.replace(/[&#]/g, (char) => encodeURIComponent(char));
 
 const serializePair = (item: Pick<KeyValueItem, 'key' | 'value'>) =>
-  item.value === '' && item.key !== ''
-    ? escapeKey(item.key)
-    : `${escapeKey(item.key)}=${escapeValue(item.value)}`;
+    item.value === '' && item.key !== ''
+        ? escapeKey(item.key)
+        : `${escapeKey(item.key)}=${escapeValue(item.value)}`;
 
 /**
  * Params after the user edited the URL: the URL's pairs become the enabled rows (keeping the ids
@@ -48,31 +53,31 @@ const serializePair = (item: Pick<KeyValueItem, 'key' | 'value'>) =>
  * not part of the URL, are kept after them.
  */
 export const paramsFromUrl = (url: string, previous: KeyValueItem[]): KeyValueItem[] => {
-  const { query } = splitUrl(url);
-  const pairs = query === null ? [] : parseQuery(query);
-  const enabled = previous.filter((item) => item.enabled);
-  const disabled = previous.filter((item) => !item.enabled);
-  const unused = [...enabled];
-  const next = pairs.map((pair, index) => {
-    const positional = enabled[index];
-    const match =
-      positional && positional.key === pair.key && unused.includes(positional)
-        ? positional
-        : unused.find((item) => item.key === pair.key);
-    if (match) unused.splice(unused.indexOf(match), 1);
-    return match
-      ? { ...match, key: pair.key, value: pair.value }
-      : { id: createId(), key: pair.key, value: pair.value, enabled: true };
-  });
-  return [...next, ...disabled];
+    const { query } = splitUrl(url);
+    const pairs = query === null ? [] : parseQuery(query);
+    const enabled = previous.filter((item) => item.enabled);
+    const disabled = previous.filter((item) => !item.enabled);
+    const unused = [...enabled];
+    const next = pairs.map((pair, index) => {
+        const positional = enabled[index];
+        const match =
+            positional && positional.key === pair.key && unused.includes(positional)
+                ? positional
+                : unused.find((item) => item.key === pair.key);
+        if (match) unused.splice(unused.indexOf(match), 1);
+        return match
+            ? { ...match, key: pair.key, value: pair.value }
+            : { id: createId(), key: pair.key, value: pair.value, enabled: true };
+    });
+    return [...next, ...disabled];
 };
 
 /** URL after the user edited the Params table: the query is rebuilt from the enabled rows. */
 export const urlWithParams = (url: string, params: KeyValueItem[]): string => {
-  const { base, hash } = splitUrl(url);
-  const query = params
-    .filter((item) => item.enabled && (item.key !== '' || item.value !== ''))
-    .map(serializePair)
-    .join('&');
-  return `${base}${query ? `?${query}` : ''}${hash}`;
+    const { base, hash } = splitUrl(url);
+    const query = params
+        .filter((item) => item.enabled && (item.key !== '' || item.value !== ''))
+        .map(serializePair)
+        .join('&');
+    return `${base}${query ? `?${query}` : ''}${hash}`;
 };

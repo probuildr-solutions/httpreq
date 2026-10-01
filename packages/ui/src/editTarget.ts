@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
 /**
  * What a profile dialog is editing: a saved item, looked up by id, or a new one that exists only
  * in the dialog until the user saves it. Closing the dialog on a new item discards it, so an

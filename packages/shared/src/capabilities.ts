@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
 /**
  * What the current runtime is allowed to do. One React application runs on both platforms, so
  * every desktop-only feature is gated on this object rather than on a build flag.
@@ -6,31 +11,31 @@
  * conditions before it touches a socket, a key file or the credential vault.
  */
 export interface PlatformCapabilities {
-  desktop: boolean;
-  ssh: boolean;
-  tunneling: boolean;
-  nativeFilePicker: boolean;
-  secureCredentialStorage: boolean;
-  /** WebSocket handshake headers; browsers forbid them. */
-  webSocketHeaders: boolean;
+    desktop: boolean;
+    ssh: boolean;
+    tunneling: boolean;
+    nativeFilePicker: boolean;
+    secureCredentialStorage: boolean;
+    /** WebSocket handshake headers; browsers forbid them. */
+    webSocketHeaders: boolean;
 }
 
 export const WEB_CAPABILITIES: PlatformCapabilities = {
-  desktop: false,
-  ssh: false,
-  tunneling: false,
-  nativeFilePicker: false,
-  secureCredentialStorage: false,
-  webSocketHeaders: false,
+    desktop: false,
+    ssh: false,
+    tunneling: false,
+    nativeFilePicker: false,
+    secureCredentialStorage: false,
+    webSocketHeaders: false,
 };
 
 export const DESKTOP_CAPABILITIES: PlatformCapabilities = {
-  desktop: true,
-  ssh: true,
-  tunneling: true,
-  nativeFilePicker: true,
-  secureCredentialStorage: true,
-  webSocketHeaders: true,
+    desktop: true,
+    ssh: true,
+    tunneling: true,
+    nativeFilePicker: true,
+    secureCredentialStorage: true,
+    webSocketHeaders: true,
 };
 
 /**
@@ -38,22 +43,22 @@ export const DESKTOP_CAPABILITIES: PlatformCapabilities = {
  * bridge failed to initialise is reported honestly as "no SSH" rather than optimistically.
  */
 export const detectCapabilities = (
-  bridge:
-    | {
-        desktop?: unknown;
-        ssh?: unknown;
-        tunnels?: unknown;
-        webSocket?: unknown;
-      }
-    | undefined,
+    bridge:
+        | {
+              desktop?: unknown;
+              ssh?: unknown;
+              tunnels?: unknown;
+              webSocket?: unknown;
+          }
+        | undefined,
 ): PlatformCapabilities => {
-  if (!bridge?.desktop) return WEB_CAPABILITIES;
-  return {
-    desktop: true,
-    ssh: !!bridge.ssh,
-    tunneling: !!bridge.ssh && !!bridge.tunnels,
-    nativeFilePicker: !!bridge.ssh,
-    secureCredentialStorage: !!bridge.ssh,
-    webSocketHeaders: !!bridge.webSocket,
-  };
+    if (!bridge?.desktop) return WEB_CAPABILITIES;
+    return {
+        desktop: true,
+        ssh: !!bridge.ssh,
+        tunneling: !!bridge.ssh && !!bridge.tunnels,
+        nativeFilePicker: !!bridge.ssh,
+        secureCredentialStorage: !!bridge.ssh,
+        webSocketHeaders: !!bridge.webSocket,
+    };
 };

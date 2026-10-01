@@ -1,36 +1,36 @@
 {
-  "name": "@httpreq/desktop",
-  "productName": "HttpReq",
-  "version": "0.3.0",
-  "description": "Local-first API client for REST requests.",
-  "author": {
-    "name": "Yamatri Reddy",
-    "email": "yamatrireddy94@gmail.com"
-  },
-  "desktopName": "httpreq.desktop",
-  "homepage": "https://github.com/yamatrireddy/httpreq",
-  "license": "GPL-3.0-only",
-  "private": true,
-  "type": "module",
-  "main": "dist/main/main.js",
-  "scripts": {
-    "build": "vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
-    "dev": "npm run build && concurrently -k \"npm run dev --workspace=@httpreq/web\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron dist/main/main.js\"",
-    "start": "electron dist/main/main.js",
-    "icons": "electron scripts/generate-icons.mjs",
-    "package": "electron-builder --config electron-builder.config.cjs --publish never",
-    "package:dir": "electron-builder --config electron-builder.config.cjs --dir"
-  },
-  "devDependencies": {
-    "@httpreq/api-client": "*",
-    "@httpreq/shared": "*",
-    "electron": "^44.4.3",
-    "electron-builder": "^26.15.3",
-    "@types/ssh2": "^1.15.5",
-    "@types/ws": "^8.18.1"
-  },
-  "dependencies": {
-    "ssh2": "^1.17.0",
-    "ws": "^8.18.3"
-  }
+    "name": "@httpreq/desktop",
+    "productName": "HttpReq",
+    "version": "0.3.0",
+    "description": "Local-first API client for REST requests.",
+    "author": {
+        "name": "Yamatri Reddy",
+        "email": "yamatrireddy94@gmail.com"
+    },
+    "desktopName": "httpreq.desktop",
+    "homepage": "https://github.com/yamatrireddy/httpreq",
+    "license": "GPL-3.0-only",
+    "private": true,
+    "type": "module",
+    "main": "dist/main/main.js",
+    "scripts": {
+        "build": "vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
+        "dev": "npm run build && concurrently -k \"npm run dev --workspace=@httpreq/web\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron dist/main/main.js\"",
+        "start": "electron dist/main/main.js",
+        "icons": "electron scripts/generate-icons.mjs",
+        "package": "electron-builder --config electron-builder.config.cjs --publish never",
+        "package:dir": "electron-builder --config electron-builder.config.cjs --dir"
+    },
+    "devDependencies": {
+        "@httpreq/api-client": "*",
+        "@httpreq/shared": "*",
+        "electron": "^44.4.3",
+        "electron-builder": "^26.15.3",
+        "@types/ssh2": "^1.15.5",
+        "@types/ws": "^8.18.1"
+    },
+    "dependencies": {
+        "ssh2": "^1.17.0",
+        "ws": "^8.18.3"
+    }
 }

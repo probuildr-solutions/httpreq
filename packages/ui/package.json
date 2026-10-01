@@ -1,29 +1,32 @@
 {
-  "name": "@httpreq/ui",
-  "version": "0.3.0",
-  "type": "module",
-  "exports": {
-    ".": "./src/index.ts"
-  },
-  "dependencies": {
-    "@fontsource/jetbrains-mono": "^5.3.0",
-    "@fontsource/poppins": "^5.3.0",
-    "@httpreq/api-client": "*",
-    "@httpreq/shared": "*",
-    "@httpreq/storage": "*",
-    "@httpreq/workspace": "*",
-    "@mantine/core": "^8.3.1",
-    "@mantine/hooks": "^8.3.1",
-    "@mantine/notifications": "^8.3.1",
-    "@monaco-editor/react": "^4.7.0",
-    "@tabler/icons-react": "^3.34.1",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/xterm": "^5.5.0",
-    "monaco-editor": "0.53.0",
-    "react": "^19.1.1",
-    "react-dom": "^19.1.1",
-    "react-router-dom": "^7.8.2",
-    "yaml": "^2.9.1",
-    "zustand": "^5.0.8"
-  }
+    "name": "@httpreq/ui",
+    "version": "0.3.0",
+    "author": {
+        "name": "Yamatri Reddy",
+        "email": "yamatrireddy94@gmail.com"
+    },
+    "license": "GPL-3.0-only",
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "dependencies": {
+        "@floating-ui/react": "^0.27.20",
+        "@fontsource/jetbrains-mono": "^5.3.0",
+        "@fontsource/poppins": "^5.3.0",
+        "@httpreq/api-client": "*",
+        "@httpreq/shared": "*",
+        "@httpreq/storage": "*",
+        "@httpreq/workspace": "*",
+        "@monaco-editor/react": "^4.7.0",
+        "@tabler/icons-react": "^3.34.1",
+        "@xterm/addon-fit": "^0.10.0",
+        "@xterm/xterm": "^5.5.0",
+        "monaco-editor": "0.53.0",
+        "react": "^19.1.1",
+        "react-dom": "^19.1.1",
+        "react-router-dom": "^7.8.2",
+        "yaml": "^2.9.1",
+        "zustand": "^5.0.8"
+    }
 }

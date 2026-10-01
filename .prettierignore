@@ -1,0 +1,10 @@
+node_modules
+dist
+dist-types
+coverage
+release
+package-lock.json
+*.tsbuildinfo
+*.icns
+*.ico
+*.png
