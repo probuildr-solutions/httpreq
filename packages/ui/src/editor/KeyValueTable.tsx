@@ -102,7 +102,7 @@ const HEADER_ACTIONS = cx(CELL_BASE, HEADER_TEXT, 'justify-end pr-1');
 const BODY_END = 'group-last/row:border-b-0';
 const BODY_CELL = cx(CELL_BASE, RULE, BODY_END);
 const CHECK_CELL = 'flex items-center justify-center p-0';
-const INPUT_CELL = 'flex items-center *:flex-1';
+const INPUT_CELL = 'flex items-center overflow-hidden *:min-w-0 *:flex-1';
 /** The description column is the first to go when the pane is narrow. */
 const DESCRIPTION = '@max-[620px]/request-editor:hidden';
 const ACTIONS_CELL = cx(CELL_BASE, BODY_END, 'flex min-w-16 items-center justify-end gap-0.5 px-1');

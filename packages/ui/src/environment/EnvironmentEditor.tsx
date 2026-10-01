@@ -8,16 +8,18 @@ import {
     IconCopy,
     IconDots,
     IconLayoutSidebarLeftExpand,
+    IconPencil,
     IconTrash,
     IconVariable,
+    IconX,
 } from '@tabler/icons-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createId, type EnvironmentVariable } from '@httpreq/shared';
 import { confirmAction } from '../confirm';
 import { KeyValueTable } from '../editor/KeyValueTable';
 import { usePreferences } from '../preferences';
 import { useWorkbenchStore } from '../store';
-import { ActionIcon, Button, Menu, Text, TextInput, Tooltip } from '../kit';
+import { ActionIcon, Menu, Text, TextInput, Tooltip } from '../kit';
 
 const createVariable = (patch: Partial<EnvironmentVariable>): EnvironmentVariable => ({
     id: createId(),
@@ -37,22 +39,44 @@ export function EnvironmentEditor({ environmentId }: { environmentId: string }) 
     const environment = useWorkbenchStore((state) =>
         state.workspace.environments.find((item) => item.id === environmentId),
     );
-    const active = useWorkbenchStore(
-        (state) => state.workspace.activeEnvironmentId === environmentId,
+    const collections = useWorkbenchStore((state) => state.workspace.collections);
+    const linked = useMemo(
+        () => collections.filter((item) => item.environmentId === environmentId),
+        [collections, environmentId],
     );
     const naming = useWorkbenchStore((state) => state.namingEnvironmentId === environmentId);
     const actions = useWorkbenchStore.getState;
     const nameRef = useRef<HTMLInputElement>(null);
+    // The name is text until Edit is chosen; the draft is only written back by Save.
+    const [editing, setEditing] = useState(false);
+    const [draft, setDraft] = useState('');
+
+    const startEditing = () => {
+        setDraft(environment?.name ?? '');
+        setEditing(true);
+    };
 
     // A new environment opens with its placeholder name selected, ready to be typed over.
     useEffect(() => {
         if (!naming) return;
+        setDraft(environment?.name ?? '');
+        setEditing(true);
+        actions().clearNamingEnvironment();
+    }, [naming, actions, environment?.name]);
+
+    useEffect(() => {
+        if (!editing) return;
         nameRef.current?.focus();
         nameRef.current?.select();
-        actions().clearNamingEnvironment();
-    }, [naming, actions]);
+    }, [editing]);
 
     if (!environment) return null;
+
+    const saveName = () => {
+        update({ name: draft.trim() || 'Environment' });
+        setEditing(false);
+    };
+    const cancelName = () => setEditing(false);
 
     const update = (patch: Parameters<ReturnType<typeof actions>['updateEnvironment']>[1]) =>
         actions().updateEnvironment(environment.id, patch);
@@ -92,45 +116,68 @@ export function EnvironmentEditor({ environmentId }: { environmentId: string }) 
             </nav>
 
             <div className="flex items-center gap-1.5 border-b border-line px-2.5 pt-1.5 pb-2">
-                <TextInput
-                    ref={nameRef}
-                    aria-label="Environment name"
-                    placeholder="Environment name"
-                    value={environment.name}
-                    onChange={(event) => update({ name: event.currentTarget.value })}
-                    onBlur={(event) =>
-                        !event.currentTarget.value.trim() && update({ name: 'Environment' })
-                    }
-                    onKeyDown={(event) => {
-                        if (event.key === 'Enter') event.currentTarget.blur();
-                    }}
-                    className="max-w-[480px] min-w-0 flex-1"
-                    inputClassName="h-8 min-h-8 font-semibold"
-                />
-                {active ? (
-                    <Button
-                        variant="light"
-                        leftSection={<IconCheck size={15} />}
-                        onClick={() => actions().setActiveEnvironment(null)}
-                        title="Requests resolve {{variables}} from this environment. Select to stop using it."
-                        className="h-8 flex-none"
-                    >
-                        Active
-                    </Button>
+                {editing ? (
+                    <>
+                        <TextInput
+                            ref={nameRef}
+                            aria-label="Environment name"
+                            placeholder="Environment name"
+                            value={draft}
+                            onChange={(event) => setDraft(event.currentTarget.value)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Enter') saveName();
+                                if (event.key === 'Escape') cancelName();
+                            }}
+                            className="max-w-[480px] min-w-0 flex-1"
+                            inputClassName="font-semibold"
+                        />
+                        <Tooltip label="Save name">
+                            <ActionIcon
+                                variant="light"
+                                size={30}
+                                aria-label="Save environment name"
+                                onClick={saveName}
+                            >
+                                <IconCheck size={16} />
+                            </ActionIcon>
+                        </Tooltip>
+                        <Tooltip label="Cancel">
+                            <ActionIcon
+                                variant="default"
+                                size={30}
+                                aria-label="Cancel renaming"
+                                onClick={cancelName}
+                            >
+                                <IconX size={16} />
+                            </ActionIcon>
+                        </Tooltip>
+                    </>
                 ) : (
-                    <Button
-                        variant="default"
-                        onClick={() => actions().setActiveEnvironment(environment.id)}
-                        className="h-8 flex-none"
-                    >
-                        Set active
-                    </Button>
+                    <>
+                        <h2
+                            className="m-0 flex h-[30px] max-w-[480px] min-w-0 items-center truncate text-sm font-semibold"
+                            title={environment.name}
+                        >
+                            {environment.name}
+                        </h2>
+                        <Tooltip label="Rename environment">
+                            <ActionIcon
+                                variant="default"
+                                size={30}
+                                aria-label="Edit environment name"
+                                onClick={startEditing}
+                            >
+                                <IconPencil size={15} />
+                            </ActionIcon>
+                        </Tooltip>
+                    </>
                 )}
+                <span className="flex-1" />
                 <Menu position="bottom-end">
                     <Menu.Target>
                         <ActionIcon
                             variant="default"
-                            size={32}
+                            size={30}
                             aria-label={`More actions for ${environment.name}`}
                         >
                             <IconDots size={16} />
@@ -175,6 +222,14 @@ export function EnvironmentEditor({ environmentId }: { environmentId: string }) 
                     showDescription={false}
                 />
                 <Text size="xs" className="text-dimmed mt-2.5">
+                    {linked.length > 0 ? (
+                        <>Used by every request in {linked.map((item) => item.name).join(', ')}. </>
+                    ) : (
+                        <>
+                            Not linked to a collection yet; link it in a collection’s settings or
+                            from the environment picker above a request.{' '}
+                        </>
+                    )}
                     Use a variable as <code>{'{{name}}'}</code> in URLs, parameters, headers, bodies
                     and authorization. Secret values are masked and kept only for this session; they
                     are never written to disk.

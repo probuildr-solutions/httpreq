@@ -6,6 +6,7 @@
 import {
     IconCopy,
     IconDots,
+    IconLink,
     IconPencil,
     IconPlus,
     IconTrash,
@@ -14,7 +15,7 @@ import {
 import { useMemo } from 'react';
 import { confirmAction } from '../confirm';
 import { useWorkbenchStore } from '../store';
-import { ActionIcon, Button, Menu, Radio, Stack, Text, Tooltip, UnstyledButton, cx } from '../kit';
+import { ActionIcon, Button, Menu, Stack, Text, Tooltip, UnstyledButton, cx } from '../kit';
 import { PanelHeader } from './PanelHeader';
 import { BulkDeleteButton, RowCheckbox, SelectionBar, SelectModeButton } from './Selection';
 import { useSelection } from './useSelection';
@@ -30,13 +31,15 @@ interface Props {
 }
 
 /**
- * Lists the environments and picks the active one. Editing happens in the environment's own tab
- * beside the request tabs, so several can be open at once. A selection mode swaps the radios for
- * checkboxes so several environments can be deleted together.
+ * Lists the environments. There is no globally active one: an environment is linked to a
+ * collection (in its settings or from the picker above the request) and every folder and request
+ * in the collection uses it. Editing happens in the environment's own tab beside the request tabs,
+ * so several can be open at once. A selection mode shows checkboxes so several environments can
+ * be deleted together.
  */
 export function EnvironmentsPanel({ onOpened }: Props) {
     const environments = useWorkbenchStore((state) => state.workspace.environments);
-    const activeId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
+    const collections = useWorkbenchStore((state) => state.workspace.collections);
     const openTabId = useWorkbenchStore((state) => state.activeEnvironmentTabId);
     const actions = useWorkbenchStore.getState;
     const selection = useSelection(
@@ -102,8 +105,8 @@ export function EnvironmentsPanel({ onOpened }: Props) {
                 </SelectionBar>
             ) : (
                 <Text size="xs" className="px-3 py-1.5 text-dimmed">
-                    The active environment resolves <code>{'{{variables}}'}</code> when a request is
-                    sent.
+                    Link an environment to a collection; its requests resolve{' '}
+                    <code>{'{{variables}}'}</code> from it.
                 </Text>
             )}
             {selection.selecting ? (
@@ -129,27 +132,17 @@ export function EnvironmentsPanel({ onOpened }: Props) {
                     ))}
                 </Stack>
             ) : (
-                <Radio.Group
-                    value={activeId ?? ''}
-                    onChange={(value) => actions().setActiveEnvironment(value || null)}
-                    aria-label="Active environment"
-                >
-                    <Stack gap={2} className={TREE}>
-                        <div className={ENV_ROW}>
-                            <Radio value="" label="No environment" size="xs" />
-                        </div>
-                        {environments.map((environment) => (
+                <Stack gap={2} className={TREE}>
+                    {environments.map((environment) => {
+                        const linked = collections
+                            .filter((collection) => collection.environmentId === environment.id)
+                            .map((collection) => collection.name);
+                        return (
                             <div
                                 key={environment.id}
                                 className={ENV_ROW}
-                                data-selected={environment.id === activeId || undefined}
                                 data-editing={environment.id === openTabId || undefined}
                             >
-                                <Radio
-                                    value={environment.id}
-                                    aria-label={`Use ${environment.name}`}
-                                    size="xs"
-                                />
                                 <UnstyledButton
                                     // The environment whose tab is showing is set in bold, like the open request.
                                     className={cx(
@@ -157,7 +150,11 @@ export function EnvironmentsPanel({ onOpened }: Props) {
                                         environment.id === openTabId && 'font-semibold',
                                     )}
                                     aria-current={environment.id === openTabId ? 'page' : undefined}
-                                    title={`Edit “${environment.name}” in a tab`}
+                                    title={
+                                        linked.length
+                                            ? `Linked to ${linked.join(', ')}`
+                                            : `Edit “${environment.name}” in a tab`
+                                    }
                                     onClick={() => edit(environment.id)}
                                 >
                                     <IconVariable size={14} aria-hidden />
@@ -170,6 +167,13 @@ export function EnvironmentsPanel({ onOpened }: Props) {
                                         }
                                     </Text>
                                 </UnstyledButton>
+                                {linked.length > 0 && (
+                                    <IconLink
+                                        size={12}
+                                        aria-label={`Linked to ${linked.join(', ')}`}
+                                        className="flex-none text-dimmed"
+                                    />
+                                )}
                                 <Menu position="bottom-end">
                                     <Menu.Target>
                                         <ActionIcon
@@ -207,9 +211,9 @@ export function EnvironmentsPanel({ onOpened }: Props) {
                                     </Menu.Dropdown>
                                 </Menu>
                             </div>
-                        ))}
-                    </Stack>
-                </Radio.Group>
+                        );
+                    })}
+                </Stack>
             )}
             {environments.length === 0 && (
                 <Stack align="flex-start" gap="xs" className="px-3 py-2.5">

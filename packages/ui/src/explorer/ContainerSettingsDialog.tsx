@@ -80,18 +80,20 @@ export function ContainerSettingsDialog({
                     minRows={2}
                     maxRows={6}
                 />
-                <Select
-                    label="Environment"
-                    description={`Activated whenever this ${kind} or a request in it is selected. A request can link its own environment instead.`}
-                    placeholder="No environment"
-                    clearable
-                    value={node.node.environmentId ?? null}
-                    data={workspace.environments.map((environment) => ({
-                        value: environment.id,
-                        label: environment.name,
-                    }))}
-                    onChange={(value) => linkEnvironment(node.node.id, value)}
-                />
+                {kind === 'collection' && (
+                    <Select
+                        label="Environment"
+                        description="Linked to this collection: its folders, nested folders and requests all use it."
+                        placeholder="No environment"
+                        clearable
+                        value={node.node.environmentId ?? null}
+                        data={workspace.environments.map((environment) => ({
+                            value: environment.id,
+                            label: environment.name,
+                        }))}
+                        onChange={(value) => linkEnvironment(node.node.id, value)}
+                    />
+                )}
                 <AuthorizationPanel
                     auth={node.node.auth}
                     onChange={(auth) => updateContainer(node.node.id, { auth })}

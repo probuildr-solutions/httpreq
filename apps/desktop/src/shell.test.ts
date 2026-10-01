@@ -8,6 +8,8 @@ import { describe, expect, it } from 'vitest';
 import {
     isAllowedExternalUrl,
     isAuthorizationUrl,
+    isClipboardText,
+    MAX_CLIPBOARD_CHARS,
     isTrustedRendererUrl,
     nextZoomLevel,
     MAX_ZOOM_LEVEL,
@@ -47,5 +49,13 @@ describe('desktop shell IPC validation', () => {
         expect(nextZoomLevel(0, 'in')).toBe(0.5);
         expect(nextZoomLevel(MAX_ZOOM_LEVEL, 'in')).toBe(MAX_ZOOM_LEVEL);
         expect(nextZoomLevel(2, 'reset')).toBe(0);
+    });
+
+    it('accepts only strings of a sane size for the clipboard', () => {
+        expect(isClipboardText('curl https://x.test')).toBe(true);
+        expect(isClipboardText('')).toBe(true);
+        expect(isClipboardText({ toString: () => 'x' })).toBe(false);
+        expect(isClipboardText(null)).toBe(false);
+        expect(isClipboardText('x'.repeat(MAX_CLIPBOARD_CHARS + 1))).toBe(false);
     });
 });

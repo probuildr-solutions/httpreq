@@ -19,7 +19,7 @@ import { activeConnectionCounts, useConnectionsStore } from './connections';
 import { recheckConnectivity, useConnectivity, type ConnectivityStatus } from './connectivity';
 import { Tooltip, cx } from './kit';
 import { usePreferences } from './preferences';
-import { useUpdates, type UpdateInfo } from './updates';
+import { describeUpdate, useUpdates, type UpdateInfo } from './updates';
 
 const statusText: Record<ConnectivityStatus, string> = {
     online: 'Online',
@@ -199,14 +199,7 @@ export const StatusBar = memo(function StatusBar({
                     Response {layout === 'right' ? 'Right' : 'Bottom'}
                 </button>
                 {update && onApplyUpdate && (
-                    <Tooltip
-                        label={
-                            update.kind === 'deployment'
-                                ? 'A newer version has been deployed. Select to reload.'
-                                : 'A newer version has been released. Select to open the download page.'
-                        }
-                        openDelay={300}
-                    >
+                    <Tooltip label={describeUpdate(update).hint} openDelay={300}>
                         {/* An available update: the one accent in the bar, noticed without being loud. */}
                         <button
                             type="button"
@@ -214,7 +207,7 @@ export const StatusBar = memo(function StatusBar({
                             onClick={() => onApplyUpdate(update)}
                         >
                             <IconArrowUpCircle size={13} aria-hidden />
-                            Update to v{update.version}
+                            {describeUpdate(update).label}
                         </button>
                     </Tooltip>
                 )}

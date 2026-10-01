@@ -19,18 +19,7 @@ import {
 import type { AuthConfig, AuthType } from '@httpreq/shared';
 import type { AuthEditorProps } from './authServices';
 import { authEditors } from './editorRegistry';
-import {
-    Alert,
-    Anchor,
-    Button,
-    FORM_DENSITY,
-    Group,
-    Select,
-    Stack,
-    Text,
-    ThemeIcon,
-    cx,
-} from '../kit';
+import { Alert, Anchor, Button, Group, Select, Stack, Text, ThemeIcon } from '../kit';
 
 interface Props {
     auth: AuthConfig;
@@ -76,7 +65,7 @@ export function AuthorizationPanel({
     }));
 
     return (
-        <Stack gap="md" className={cx(FORM_DENSITY, 'max-w-[760px]')}>
+        <Stack gap="md" className="max-w-[760px]">
             <Stack gap={4}>
                 <Select
                     label="Authorization type"

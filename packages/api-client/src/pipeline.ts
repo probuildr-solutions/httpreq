@@ -5,6 +5,7 @@
 
 import {
     AppError,
+    applyPathVariables,
     type AuthConfig,
     type Environment,
     type ExecutionHooks,
@@ -177,7 +178,7 @@ export const buildRequest = async (
 
     // 1. Variable resolution. An undefined variable in the scheme or host makes the request
     // unsendable; one in the path or query is sent as written, with a warning.
-    let urlText = resolver.resolve(request.url.trim());
+    let urlText = resolver.resolve(applyPathVariables(request.url.trim(), request.pathVariables));
     const undefinedInUrl = [...resolver.unresolved];
     if (!urlText) throw new AppError('INVALID_REQUEST', 'Enter a URL before sending.');
     if (!SCHEME.test(urlText) && !urlText.startsWith('{{')) urlText = `http://${urlText}`;

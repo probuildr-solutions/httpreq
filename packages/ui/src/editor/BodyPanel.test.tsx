@@ -87,3 +87,45 @@ describe('multipart form-data body', () => {
         });
     });
 });
+
+describe('raw body', () => {
+    const jsonRequest = (): HttpRequest => {
+        const request = createEmptyRequest();
+        return {
+            ...request,
+            method: 'POST',
+            body: { ...request.body, mode: 'json', json: '{"a":1}' },
+        };
+    };
+
+    it('replaces the separate JSON and Text types with Raw and a format dropdown', () => {
+        renderPanel(jsonRequest());
+        expect(screen.getByText('Raw')).toBeInTheDocument();
+        expect(screen.queryByText('JSON', { selector: 'label' })).not.toBeInTheDocument();
+        expect(screen.getByRole('combobox', { name: 'Raw body format' })).toHaveTextContent('JSON');
+    });
+
+    it('offers JSON, Text, XML, HTML and JavaScript', () => {
+        renderPanel(jsonRequest());
+        fireEvent.click(screen.getByRole('combobox', { name: 'Raw body format' }));
+        expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+            'JSON',
+            'Text',
+            'XML',
+            'HTML',
+            'JavaScript',
+        ]);
+    });
+
+    it('switching format carries the content and sets the content type', () => {
+        const onChange = vi.fn();
+        renderPanel(jsonRequest(), onChange);
+        fireEvent.click(screen.getByRole('combobox', { name: 'Raw body format' }));
+        fireEvent.click(screen.getByRole('option', { name: 'XML' }));
+        expect(onChange.mock.calls.at(-1)![0].body).toMatchObject({
+            mode: 'text',
+            textContentType: 'application/xml',
+            text: '{"a":1}',
+        });
+    });
+});

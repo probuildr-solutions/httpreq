@@ -241,7 +241,11 @@ function UpdateStatusLine({
         <Stack gap={6} align="center" className="mt-2">
             {update ? (
                 <Text size="sm" className="text-primary-text font-semibold">
-                    Version {update.version} is available.
+                    {update.kind === 'restart'
+                        ? `Version ${update.version} is downloaded and ready to install.`
+                        : update.progress !== undefined
+                          ? `Version ${update.version} is downloading (${update.progress}%).`
+                          : `Version ${update.version} is available.`}
                 </Text>
             ) : status === 'current' ? (
                 <Text size="xs" className="text-dimmed">
@@ -253,9 +257,13 @@ function UpdateStatusLine({
                 </Text>
             ) : null}
             <Group gap="xs" justify="center">
-                {update && onApply && (
+                {update && onApply && update.progress === undefined && (
                     <Button size="xs" onClick={() => onApply(update)}>
-                        {update.kind === 'deployment' ? 'Reload to update' : 'Download update'}
+                        {update.kind === 'deployment'
+                            ? 'Reload to update'
+                            : update.kind === 'restart'
+                              ? 'Restart to update'
+                              : 'Download update'}
                     </Button>
                 )}
                 <Button

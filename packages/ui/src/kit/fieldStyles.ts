@@ -8,10 +8,10 @@ export type FieldSize = 'xs' | 'sm' | 'md';
 
 /** Height and type size of a single-line control, per size step. */
 export const CONTROL_SIZE: Record<FieldSize, string> = {
-    xs: 'min-h-[30px] text-xs',
-    // Forms set `--control-h` (see FORM_DENSITY) so selects and number fields match the 30px
-    // variable-aware fields beside them.
-    sm: 'min-h-[var(--control-h,2.25rem)] text-sm',
+    // `xs` and `sm` differ only in type size: both are the design system's control height
+    // (`--control-h`), the same as the variable-aware fields and default buttons.
+    xs: 'min-h-[var(--control-h)] text-xs',
+    sm: 'min-h-[var(--control-h)] text-sm',
     md: 'min-h-[42px] text-base',
 };
 
@@ -22,7 +22,7 @@ export const CONTROL_SIZE: Record<FieldSize, string> = {
 export const controlSize = (size: FieldSize, variant: 'default' | 'unstyled') =>
     variant === 'unstyled'
         ? cx('min-h-7 px-2', size === 'xs' ? 'text-xs' : 'text-sm')
-        : cx(CONTROL_SIZE[size], 'px-2.5');
+        : cx(CONTROL_SIZE[size], 'px-[var(--control-px)]');
 
 /** The frame every text control shares. `unstyled` drops it for controls embedded in a table. */
 export const inputFrame = (variant: 'default' | 'unstyled', invalid?: boolean) =>

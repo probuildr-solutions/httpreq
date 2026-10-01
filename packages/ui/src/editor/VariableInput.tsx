@@ -62,7 +62,7 @@ const GLYPH_METRICS =
 
 const ROOT = [
     'relative flex h-[var(--vi-height)] min-w-0 items-center font-sans text-sm text-fg',
-    '[--vi-height:30px] [--vi-padding:9px]',
+    '[--vi-height:var(--control-h)] [--vi-padding:var(--control-px)]',
     'data-[mono]:font-mono data-[mono]:text-[12.5px]',
     'data-[variant=box]:rounded-sm data-[variant=box]:border data-[variant=box]:border-line data-[variant=box]:bg-field',
     'data-[variant=box]:focus-within:border-primary data-[variant=box]:data-[invalid]:border-danger',

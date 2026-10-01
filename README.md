@@ -83,6 +83,12 @@ A version with a hyphen (`0.2.0-beta.1`) is published as a pre-release, which th
 
 Packages are unsigned (Windows) or signed ad hoc (macOS) unless these repository secrets are set: `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` (a base64 `.pfx` Authenticode certificate); `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD` (a base64 Developer ID Application `.p12`); and `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization.
 
+### Automatic updates
+
+The installed desktop app updates itself the way VS Code does. About 20 seconds after it starts, and every six hours after that, it reads `latest.yml` (`latest-mac.yml`, `latest-linux.yml`) from the latest GitHub Release, downloads a newer version in the background (progress shows in the status bar), verifies the SHA-512 from that file and offers **Restart now**. An update that is downloaded but not yet installed is also installed the next time the app quits. The release workflow uploads these files and the `.blockmap`s beside the installers, so a release must be published by the workflow, not by hand. **Help › Check for Updates** checks immediately.
+
+A failed check, download or install only shows a message; the installed version keeps working. Self-update runs for the Windows installer, the macOS app and the Linux AppImage. A `.deb` is updated by the package manager, and an ad hoc signed macOS build cannot install updates (macOS requires a Developer ID signature for that), so both fall back to the release page. Development builds never look for updates.
+
 ### Opening the macOS app
 
 Without a Developer ID certificate the macOS builds are signed ad hoc. That keeps the Apple silicon (arm64) app valid, so macOS no longer reports it as _damaged_, but it is not notarized, so the first launch shows the ordinary "unidentified developer" prompt: open **System Settings › Privacy & Security** and choose **Open Anyway** (or Control-click the app and choose **Open**). If macOS still refuses a quarantined download, `xattr -dr com.apple.quarantine /Applications/HttpReq.app` clears the flag. Set the `MAC_CSC_LINK`, `MAC_CSC_KEY_PASSWORD` and `APPLE_*` secrets to ship a signed and notarized app that opens with no prompt at all; the packaging job then also checks Gatekeeper acceptance and the notarization ticket.

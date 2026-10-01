@@ -30,6 +30,12 @@ are encrypted with the OS credential vault, and workspace data never contains li
 renderer's IndexedDB data is keyed to that origin: moving to a custom protocol would orphan every
 user's workspaces. Revisit it together with a storage migration.
 
+## Clipboard and updates
+
+The renderer has no clipboard permission (all web permissions are denied), so "Copy as cURL" and every other copy goes through `clipboard:write-text` in the main process, which Electron's `clipboard` module serves. Only the app's own top-level document may call it, the payload must be a string of at most 10 million characters, and nothing but plain text moves. Reading (for pasting into the SSH terminal) is the same kind of one-purpose channel.
+
+Updates are delivered by `electron-updater` in the main process, never the renderer: the renderer can only ask for the current state, a check, or an install of a version that is already downloaded and verified. The feed is the project's GitHub Releases (baked into `app-update.yml` at package time), downloads are checked against the SHA-512 in the release metadata, and the module is loaded lazily so a failure to load or run it never prevents the app from starting.
+
 ## Runtime policy
 
 All of it lives in [`apps/desktop/src/security.ts`](../apps/desktop/src/security.ts), with tests in

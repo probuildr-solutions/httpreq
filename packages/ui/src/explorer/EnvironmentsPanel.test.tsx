@@ -45,6 +45,7 @@ describe('editing environments', () => {
         const name = screen.getByLabelText('Environment name');
         expect(name).toHaveFocus();
         fireEvent.change(name, { target: { value: 'Staging' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save environment name' }));
         fireEvent.change(screen.getByPlaceholderText('Add variable'), {
             target: { value: 'base_url' },
         });
@@ -67,7 +68,34 @@ describe('editing environments', () => {
 
         expect(state().openEnvironmentTabIds).toEqual([development!.id, production!.id]);
         expect(state().activeEnvironmentTabId).toBe(development!.id);
-        expect(screen.getByLabelText('Environment name')).toHaveValue('Development');
+        // The name is plain text until Edit is chosen.
+        expect(screen.queryByLabelText('Environment name')).not.toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Development' })).toBeInTheDocument();
+    });
+
+    it('edits the name only after Edit, and Cancel keeps the old one', () => {
+        act(() => {
+            state().updateEnvironment(state().createEnvironment(), { name: 'Development' });
+        });
+        fireEvent.click(screen.getByRole('button', { name: /^Development\s*\d/ }));
+
+        fireEvent.click(screen.getByRole('button', { name: 'Edit environment name' }));
+        fireEvent.change(screen.getByLabelText('Environment name'), { target: { value: 'Dev 2' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel renaming' }));
+        expect(state().workspace.environments[0]!.name).toBe('Development');
+
+        fireEvent.click(screen.getByRole('button', { name: 'Edit environment name' }));
+        fireEvent.change(screen.getByLabelText('Environment name'), { target: { value: 'Dev 2' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save environment name' }));
+        expect(state().workspace.environments[0]!.name).toBe('Dev 2');
+    });
+
+    it('has no radio buttons or active toggle: environments are linked to collections', () => {
+        act(() => {
+            state().updateEnvironment(state().createEnvironment(), { name: 'Development' });
+        });
+        expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+        expect(screen.queryByText('Set active')).not.toBeInTheDocument();
     });
 
     it('selects several environments and deletes them together after confirming', async () => {
@@ -77,7 +105,10 @@ describe('editing environments', () => {
             }
         });
         const [, staging, production] = state().workspace.environments;
-        act(() => state().setActiveEnvironment(staging!.id));
+        act(() => {
+            const collectionId = state().createCollection();
+            state().linkEnvironment(collectionId, staging!.id);
+        });
 
         fireEvent.click(screen.getByRole('button', { name: 'Select environments' }));
         expect(screen.getByText('0 selected')).toBeInTheDocument();

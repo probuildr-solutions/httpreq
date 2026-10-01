@@ -46,8 +46,13 @@ export const splitUrl = (url: string): SplitUrl => {
         rest = absolute[2]!;
     }
     const serverVariables = [...server.matchAll(VARIABLE)].map((match) => match[1]!);
-    const pathParameters = [...rest.matchAll(VARIABLE)].map((match) => match[1]!);
-    const path = `/${rest.replace(/^\/+/, '')}`.replace(VARIABLE, '{$1}');
+    const pathParameters = [
+        ...rest.matchAll(VARIABLE),
+        ...rest.matchAll(/(?<=\/):([A-Za-z_][\w.-]*)(?=\/|$)/g),
+    ].map((match) => match[1]!);
+    const path = `/${rest.replace(/^\/+/, '')}`
+        .replace(VARIABLE, '{$1}')
+        .replace(/(?<=\/):([A-Za-z_][\w.-]*)(?=\/|$)/g, '{$1}');
     return {
         server: server.replace(VARIABLE, '{$1}'),
         serverVariables,
@@ -339,7 +344,10 @@ export const toOpenApi = (source: ExportSource) => {
                 name,
                 in: 'path',
                 required: true,
-                ...parameterSchema(exampleOf(name)),
+                ...parameterSchema(
+                    request.pathVariables?.find((item) => item.key === name)?.value ||
+                        exampleOf(name),
+                ),
             })),
             ...request.params
                 .filter((param) => param.key)

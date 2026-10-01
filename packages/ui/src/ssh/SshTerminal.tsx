@@ -15,6 +15,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import { Terminal } from '@xterm/xterm';
 import '@xterm/xterm/css/xterm.css';
 import type { SshStatus } from '@httpreq/shared';
+import { copyText, readClipboardText } from '../clipboard';
 import { useConnectionsStore } from '../connections';
 import { useSsh } from './useSsh';
 import { Alert, Button, Group, STATUS_ROW, StatusDot, Text, useComputedColorScheme } from '../kit';
@@ -150,13 +151,13 @@ function TerminalSurface({ sessionId, connected }: SurfaceProps) {
             const modifier = event.ctrlKey || event.metaKey;
             if (event.type !== 'keydown' || !modifier || !event.shiftKey) return true;
             if (event.key.toLowerCase() === 'c' && instance.hasSelection()) {
-                void navigator.clipboard.writeText(instance.getSelection());
+                void copyText(instance.getSelection()).catch(() => undefined);
                 return false;
             }
             if (event.key.toLowerCase() === 'v') {
-                void navigator.clipboard
-                    .readText()
-                    .then((text) => sshRef.current.write(sessionId, text));
+                void readClipboardText()
+                    .then((text) => sshRef.current.write(sessionId, text))
+                    .catch(() => undefined);
                 return false;
             }
             return true;

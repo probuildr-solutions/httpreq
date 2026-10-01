@@ -44,8 +44,15 @@ module.exports = {
     // and the version and architecture are always visible, e.g. HttpReq-0.2.0-mac-arm64.dmg.
     artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
     // Packages are attached to GitHub Releases by .github/workflows/desktop-packages.yml, never by
-    // electron-builder itself, so it must not try to publish when it detects CI and a tag.
-    publish: null,
+    // electron-builder itself (the package script passes `--publish never`). This block is what the
+    // installed app's updater reads: it is written into the app as `app-update.yml`, and it makes
+    // electron-builder emit the update metadata (`latest.yml`, `latest-mac.yml`, `latest-linux.yml`)
+    // that the workflow uploads to the release beside the installers. The app finds a newer version
+    // by reading that file from the latest GitHub Release, downloads it in the background, checks
+    // its SHA-512 against the metadata and installs it on the next restart.
+    publish: [
+        { provider: 'github', owner: 'yamatrireddy', repo: 'httpreq', releaseType: 'release' },
+    ],
     asar: true,
     // The renderer is copied into the asar as `renderer/`, which is where the main process loads it.
     files: [
@@ -94,7 +101,7 @@ module.exports = {
     mac: {
         icon: 'build/icon.icns',
         category: 'public.app-category.developer-tools',
-        // Intel and Apple silicon builds; the zip is what a future auto-updater would consume.
+        // Intel and Apple silicon builds; the zip is what the auto-updater downloads (the dmg is for first installs).
         target: [
             { target: 'dmg', arch: ['x64', 'arm64'] },
             { target: 'zip', arch: ['x64', 'arm64'] },

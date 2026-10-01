@@ -9,6 +9,7 @@ import {
     createFolder,
     createKeyValue,
     isHttpMethod,
+    syncPathVariables,
     type AuthConfig,
     type Folder,
     type HttpRequest,
@@ -113,8 +114,10 @@ const convertAuth = (value: unknown, warnings: Set<string>): AuthConfig | null =
 };
 
 /** The request URL: Postman stores it as a string or as parts plus a `raw` form. */
-const convertUrl = (value: unknown): { url: string; disabled: KeyValueItem[] } => {
-    if (!isObject(value)) return { url: str(value), disabled: [] };
+const convertUrl = (
+    value: unknown,
+): { url: string; disabled: KeyValueItem[]; pathVariables: KeyValueItem[] } => {
+    if (!isObject(value)) return { url: str(value), disabled: [], pathVariables: [] };
     let url = str(value.raw);
     if (!url) {
         const host = Array.isArray(value.host) ? value.host.map(str).join('.') : str(value.host);
@@ -126,16 +129,6 @@ const convertUrl = (value: unknown): { url: string; disabled: KeyValueItem[] } =
             .join('&');
         url = `${protocol ? `${protocol}://` : ''}${host}${path ? `/${path}` : ''}${query ? `?${query}` : ''}`;
     }
-    // Path variables (`:id`) become `{{id}}`, or their value when the collection gives one.
-    for (const variable of list(value.variable).filter(isObject)) {
-        const key = str(variable.key);
-        if (!key) continue;
-        const replacement = str(variable.value) || `{{${key}}}`;
-        url = url.replace(
-            new RegExp(`/:${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=/|\\?|#|$)`, 'g'),
-            `/${replacement}`,
-        );
-    }
     const disabled = list(value.query)
         .filter((item): item is Json => isObject(item) && item.disabled === true)
         .map((item) =>
@@ -146,7 +139,23 @@ const convertUrl = (value: unknown): { url: string; disabled: KeyValueItem[] } =
                 description: description(item.description) || undefined,
             }),
         );
-    return { url, disabled };
+    // Path variables (`:id`) stay in the URL; their values fill the path-variable table.
+    const declared = new Map(
+        list(value.variable)
+            .filter(isObject)
+            .map((variable) => [str(variable.key), variable] as const),
+    );
+    const pathVariables = syncPathVariables(url).map((row) => {
+        const variable = declared.get(row.key);
+        return variable
+            ? {
+                  ...row,
+                  value: str(variable.value),
+                  description: description(variable.description) || undefined,
+              }
+            : row;
+    });
+    return { url, disabled, pathVariables };
 };
 
 const TEXT_LANGUAGES: Record<string, TextContentType> = {
@@ -304,8 +313,9 @@ export const fromPostmanCollection = (doc: Json, fileName: string): ImportPlan =
             request.name = str(item.name).trim() || `${method} request`;
             request.method = method;
             request.description = description(source.description);
-            const { url, disabled } = convertUrl(source.url);
+            const { url, disabled, pathVariables } = convertUrl(source.url);
             request.url = url;
+            if (pathVariables.length) request.pathVariables = pathVariables;
             request.params = [...paramsFromUrl(url, []), ...disabled];
             request.headers = (Array.isArray(source.header) ? source.header : [])
                 .filter(isObject)

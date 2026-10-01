@@ -22,10 +22,15 @@ import { LATEST_RELEASE_API, RELEASES_URL, type BuildInfo } from '@httpreq/share
 export interface UpdateInfo {
     /** The newer version, e.g. `0.2.0`. */
     version: string;
-    /** `release`: a download to install; `deployment`: reload the page to switch to it. */
-    kind: 'release' | 'deployment';
+    /**
+     * `release`: a download to install; `deployment`: reload the page to switch to it; `restart`:
+     * the desktop app has already downloaded it and only needs to restart to install it.
+     */
+    kind: 'release' | 'deployment' | 'restart';
     /** Release page for a `release`. */
     url?: string;
+    /** Percent downloaded, while the desktop app is fetching the update in the background. */
+    progress?: number;
     /** Release notes, when the source has them. */
     notes?: string;
 }
@@ -126,6 +131,31 @@ export const deploymentCheck =
             ? { version: deployed.version, kind: 'deployment' }
             : null;
     };
+
+/** The status bar's label and hint for an update, by what it takes to get it. */
+export const describeUpdate = (update: UpdateInfo) => {
+    if (update.kind === 'restart') {
+        return {
+            label: `Restart to update to v${update.version}`,
+            hint: 'The update is downloaded. Select to restart HttpReq and install it.',
+        };
+    }
+    if (update.progress !== undefined) {
+        return {
+            label: `Downloading v${update.version}… ${update.progress}%`,
+            hint: 'The update is downloading in the background.',
+        };
+    }
+    return update.kind === 'deployment'
+        ? {
+              label: `Update to v${update.version}`,
+              hint: 'A newer version has been deployed. Select to reload.',
+          }
+        : {
+              label: `Update to v${update.version}`,
+              hint: 'A newer version has been released. Select to open the download page.',
+          };
+};
 
 export type UpdateStatus = 'idle' | 'checking' | 'current' | 'available' | 'error';
 

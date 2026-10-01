@@ -1,7 +1,7 @@
 {
     "name": "@httpreq/desktop",
     "productName": "HttpReq",
-    "version": "0.3.0",
+    "version": "0.4.0",
     "description": "Local-first API client for REST requests.",
     "author": {
         "name": "Yamatri Reddy",
@@ -24,12 +24,13 @@
     "devDependencies": {
         "@httpreq/api-client": "*",
         "@httpreq/shared": "*",
-        "electron": "^44.4.3",
-        "electron-builder": "^26.15.3",
         "@types/ssh2": "^1.15.5",
-        "@types/ws": "^8.18.1"
+        "@types/ws": "^8.18.1",
+        "electron": "^44.4.3",
+        "electron-builder": "^26.15.3"
     },
     "dependencies": {
+        "electron-updater": "^6.8.9",
         "ssh2": "^1.17.0",
         "ws": "^8.18.3"
     }

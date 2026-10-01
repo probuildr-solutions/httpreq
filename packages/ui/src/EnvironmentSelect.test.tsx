@@ -11,15 +11,15 @@ import { EnvironmentSelect } from './EnvironmentSelect';
 
 const state = () => useWorkbenchStore.getState();
 
-describe('the active-environment picker', () => {
+describe('the collection environment picker', () => {
     let staging = '';
 
     beforeEach(() => {
         act(() => {
             state().load(createWorkspace('Alpha'), {}, []);
+            state().selectNode(state().createCollection());
             staging = state().createEnvironment();
             state().updateEnvironment(staging, { name: 'Staging' });
-            state().setActiveEnvironment(null);
             state().setSidebarView('collections');
         });
         render(
@@ -29,11 +29,12 @@ describe('the active-environment picker', () => {
         );
     });
 
-    it('names the active environment and switches it from its menu', async () => {
+    it('names the collection’s environment and links another from its menu', async () => {
         const trigger = screen.getByRole('button', { name: /^Environment: No environment/ });
         fireEvent.click(trigger);
         fireEvent.click(await screen.findByRole('menuitem', { name: 'Staging' }));
 
+        expect(state().workspace.collections[0]!.environmentId).toBe(staging);
         expect(state().workspace.activeEnvironmentId).toBe(staging);
         expect(screen.getByRole('button', { name: /^Environment: Staging/ })).toBeInTheDocument();
     });

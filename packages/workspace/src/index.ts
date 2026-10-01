@@ -74,7 +74,8 @@ export const createDefaultWorkspace = (): Workspace => {
         version: WORKSPACE_VERSION,
         id: DEFAULT_WORKSPACE_ID,
         name: 'My Workspace',
-        collections: [collection],
+        // The sample request uses {{base_url}}, so its collection is linked to the environment that defines it.
+        collections: [{ ...collection, environmentId: environment.id }],
         folders: [],
         requests: [request],
         websocketRequests: [],
@@ -192,6 +193,9 @@ export const normalizeRequest = (
         method: isHttpMethod(value.method) ? value.method : 'GET',
         url: str(value.url),
         params: list(value.params).map(normalizeKeyValue),
+        ...(Array.isArray(value.pathVariables) && value.pathVariables.length
+            ? { pathVariables: list(value.pathVariables).map(normalizeKeyValue) }
+            : {}),
         headers: list(value.headers).map(normalizeKeyValue),
         body: normalizeBody(value.body),
         auth: normalizeAuth(value.auth) ?? (parentId ? { type: 'inherit' } : { type: 'none' }),

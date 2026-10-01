@@ -12,6 +12,7 @@ import {
     type ReactNode,
 } from 'react';
 import { IconX } from '@tabler/icons-react';
+import { copyText } from '../clipboard';
 import { cx } from './cx';
 import { Loader } from './layout';
 import { DEFAULT_CONTROL, toneClasses, type Tone } from './tones';
@@ -21,8 +22,8 @@ export type ButtonVariant = 'filled' | 'light' | 'subtle' | 'outline' | 'default
 const BUTTON_SIZE = {
     'compact-xs': 'h-[22px] px-[7px] text-2xs',
     'compact-sm': 'h-[26px] px-2.5 text-xs',
-    xs: 'h-[30px] px-3.5 text-xs',
-    sm: 'h-[var(--control-h,2.25rem)] px-4 text-sm',
+    xs: 'h-[var(--control-h)] px-3.5 text-xs',
+    sm: 'h-[var(--control-h)] px-4 text-sm',
     md: 'h-[42px] px-[18px] text-base',
 } as const;
 
@@ -240,11 +241,13 @@ export function CopyButton({
     useEffect(() => () => clearTimeout(timer.current), []);
 
     const copy = useCallback(() => {
-        void navigator.clipboard?.writeText(value).then(() => {
-            setCopied(true);
-            clearTimeout(timer.current);
-            timer.current = setTimeout(() => setCopied(false), timeout);
-        });
+        void copyText(value)
+            .then(() => {
+                setCopied(true);
+                clearTimeout(timer.current);
+                timer.current = setTimeout(() => setCopied(false), timeout);
+            })
+            .catch(() => undefined);
     }, [value, timeout]);
 
     return <>{children({ copied, copy })}</>;
