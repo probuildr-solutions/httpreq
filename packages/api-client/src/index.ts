@@ -25,6 +25,7 @@ export * from './auth/types';
 export * from './curl';
 export * from './generatedHeaders';
 export * from './pipeline';
+export * from './protocols';
 export * from './responses';
 export * from './transport';
 export * from './variables';

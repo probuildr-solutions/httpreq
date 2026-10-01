@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import type { Folder, HttpMethod, TreeNodeKind, Workspace } from '@httpreq/shared';
+import type { Folder, HttpMethod, ProtocolId, TreeNodeKind, Workspace } from '@httpreq/shared';
 
 export interface TreeRow {
     id: string;
@@ -13,6 +13,8 @@ export interface TreeRow {
     parentId: string | null;
     /** HTTP rows carry their verb; WebSocket rows are labelled "WS" by the explorer. */
     method?: HttpMethod;
+    /** Set for SOAP, gRPC and MQTT requests, which are labelled by protocol instead of verb. */
+    protocol?: ProtocolId;
     url?: string;
     hasChildren: boolean;
     expanded: boolean;
@@ -81,7 +83,13 @@ export const buildRows = (
     };
 
     const leafRow = (
-        item: { id: string; name: string; url: string; method?: HttpMethod },
+        item: {
+            id: string;
+            name: string;
+            url: string;
+            method?: HttpMethod;
+            protocol?: ProtocolId;
+        },
         kind: 'request' | 'websocket',
         depth: number,
         parentId: string | null,
@@ -92,6 +100,7 @@ export const buildRows = (
         depth,
         parentId,
         ...(item.method ? { method: item.method } : {}),
+        ...(item.protocol ? { protocol: item.protocol } : {}),
         url: item.url,
         hasChildren: false,
         expanded: false,

@@ -6,20 +6,24 @@
 import {
     AppError,
     applyPathVariables,
+    isHttpMethod,
     type AuthConfig,
     type Environment,
     type ExecutionHooks,
     type FileReference,
+    type HttpMethod,
     type HttpRequest,
     type HttpResponse,
     type HttpRuntime,
     type PreparedBody,
     type PreparedRequest,
+    type ScriptRequestView,
     type Workspace,
 } from '@httpreq/shared';
 import { getAuthProvider, resolveEffectiveAuth, type EffectiveAuth } from './auth/registry';
 import { HeaderMap, type AuthContext, type RequestDraft } from './auth/types';
 import { defaultBodyContentType } from './generatedHeaders';
+import { soapToHttp } from './protocols/soap/adapter';
 import { createVariableResolver, type ResolverOptions, type VariableResolver } from './variables';
 
 /**
@@ -31,11 +35,31 @@ import { createVariableResolver, type ResolverOptions, type VariableResolver } f
  * The saved request is never mutated; resolved values only exist in the `PreparedRequest`.
  */
 
-/** Lifecycle hooks for request scripts. Execution is not implemented yet; this is the seam. */
+/**
+ * Lifecycle hooks for request scripts; the seam the Scripts module (`@httpreq/scripting`) plugs
+ * into. The pipeline hands a script runner plain data and takes plain data back: `preRequest`
+ * mutates the view it is given, and the pipeline validates and applies the result, so a script can
+ * never put the request into a shape the transport would not accept.
+ */
 export interface ScriptRunner {
-    preRequest?(request: RequestDraft, source: HttpRequest): void | Promise<void>;
+    preRequest?(request: ScriptRequestView, source: HttpRequest): void | Promise<void>;
     postResponse?(response: HttpResponse, source: HttpRequest): void | Promise<void>;
 }
+
+/**
+ * Runs the pre-request scripts over a view of the request and returns the validated result, or
+ * null when no script ran. Shared by every protocol that has a request to script.
+ */
+export const runPreRequestScripts = async (
+    scripts: ScriptRunner | undefined,
+    view: ScriptRequestView,
+    source: HttpRequest,
+): Promise<ScriptRequestView | null> => {
+    if (!scripts?.preRequest) return null;
+    const working: ScriptRequestView = { ...view, headers: { ...view.headers } };
+    await scripts.preRequest(working, source);
+    return working;
+};
 
 export interface PipelineContext {
     /** For authorization inheritance. */
@@ -166,9 +190,12 @@ const buildBody = async (
 
 /** Runs every pipeline stage up to the final request, without sending it. */
 export const buildRequest = async (
-    request: HttpRequest,
+    source: HttpRequest,
     context: PipelineContext,
 ): Promise<BuiltRequest> => {
+    // SOAP is HTTP with an envelope: it is reshaped into a plain HTTP request here, so everything
+    // below (variables, authorization, scripts, transport) is shared with HTTP rather than copied.
+    const request = source.protocol === 'soap' ? soapToHttp(source) : source;
     const warnings: string[] = [];
     const resolver = createVariableResolver(context.environment, context.resolverOptions);
     const authContext: AuthContext = {
@@ -202,7 +229,7 @@ export const buildRequest = async (
         throw new AppError('INVALID_REQUEST', `“${urlText}” is not a valid URL.`);
     }
 
-    const headers = new HeaderMap();
+    let headers = new HeaderMap();
     enabledRows(request.headers).forEach((item) =>
         headers.set(resolver.resolve(item.key.trim()), resolver.resolve(item.value)),
     );
@@ -234,11 +261,39 @@ export const buildRequest = async (
     }
     await provider.applyToRequest(resolvedAuth, draft, authContext);
 
-    // 3. Pre-request scripts.
-    await context.scripts?.preRequest?.(draft, request);
-
-    // 4. Final request.
-    const body = await buildBody(request, resolver, headers, context, warnings);
+    // 3. Final request body, then pre-request scripts over the finished request.
+    let body = await buildBody(request, resolver, headers, context, warnings);
+    const scripted = await runPreRequestScripts(
+        context.scripts,
+        {
+            method: draft.method,
+            url: draft.url.toString(),
+            headers: headers.toRecord(),
+            body: body?.kind === 'text' ? body.text : null,
+            bodyEditable: !body || body.kind === 'text',
+        },
+        request,
+    );
+    if (scripted) {
+        const method = scripted.method.toUpperCase();
+        if (!isHttpMethod(method)) {
+            throw new AppError(
+                'INVALID_REQUEST',
+                `The pre-request script set an unsupported method “${scripted.method}”.`,
+            );
+        }
+        draft.method = method as HttpMethod;
+        try {
+            draft.url = new URL(scripted.url);
+        } catch {
+            throw new AppError('INVALID_REQUEST', 'The pre-request script set an invalid URL.');
+        }
+        headers = new HeaderMap(scripted.headers);
+        if (scripted.bodyEditable) {
+            const bodiless = draft.method === 'GET' || draft.method === 'HEAD';
+            body = scripted.body && !bodiless ? { kind: 'text', text: scripted.body } : undefined;
+        }
+    }
     if (resolver.unresolved.size > 0) {
         warnings.push(
             `Not defined, sent as written: ${[...resolver.unresolved].map((name) => `{{${name}}}`).join(', ')}.`,

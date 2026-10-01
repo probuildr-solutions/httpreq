@@ -12,21 +12,34 @@ import {
     webContents,
 } from 'electron';
 import {
+    AppError,
     createId,
     parseSshProfile,
     parseTunnelProfile,
     redact,
+    serializeError,
     sshError,
     sshErrorOf,
     type HostKeyDecision,
     type HostKeyPrompt,
+    type GrpcResponse,
     type IpcOutcome,
     type IpcResult,
+    type MqttEvent,
+    type MqttSubscribeResult,
     type SshSessionEvent,
     type TerminalSize,
     type TunnelRuntimeState,
     type WebSocketEvent,
 } from '@httpreq/shared';
+import { GrpcCallManager, parsePreparedGrpcCall } from './grpc';
+import {
+    MqttManager,
+    parseMqttPublish,
+    parseMqttSubscriptions,
+    parseMqttTopics,
+    parsePreparedMqtt,
+} from './mqtt';
 import { CredentialStore, credentialStorePath } from './ssh/credentials';
 import { KnownHostsStore, knownHostsPath } from './ssh/knownHosts';
 import { SshSessionManager } from './ssh/sessions';
@@ -51,6 +64,8 @@ export interface ServiceDeps {
 /** Counts shown in the desktop status bar. */
 export interface ServiceCounts {
     webSockets: number;
+    mqtt: number;
+    grpcCalls: number;
     sshSessions: number;
     tunnels: number;
 }
@@ -124,6 +139,11 @@ export const registerServices = ({ isTrustedSender }: ServiceDeps) => {
         sendTo(senderId, 'ws:event', socketId, event),
     );
 
+    const grpcCalls = new GrpcCallManager();
+    const mqttConnections = new MqttManager((senderId, connectionId, event: MqttEvent) =>
+        sendTo(senderId, 'mqtt:event', connectionId, event),
+    );
+
     const sessions = new SshSessionManager(
         { credentials, knownHosts },
         (senderId, sessionId, event: SshSessionEvent) =>
@@ -138,6 +158,8 @@ export const registerServices = ({ isTrustedSender }: ServiceDeps) => {
 
     const counts = (): ServiceCounts => ({
         webSockets: sockets.size,
+        mqtt: mqttConnections.size,
+        grpcCalls: grpcCalls.size,
         sshSessions: sessions.size,
         tunnels: tunnels.activeCount,
     });
@@ -196,6 +218,109 @@ export const registerServices = ({ isTrustedSender }: ServiceDeps) => {
             typeof code === 'number' ? code : undefined,
             typeof reason === 'string' ? reason : undefined,
         );
+    });
+
+    /* ---------- gRPC ---------- */
+
+    const invalid = (message: string) =>
+        ({ ok: false, error: { code: 'INVALID_REQUEST', message } }) as const;
+
+    ipcMain.handle(
+        'grpc:call',
+        async (event, callId: unknown, prepared: unknown): Promise<IpcResult<GrpcResponse>> => {
+            if (!isTrustedSender(event) || typeof callId !== 'string' || !callId) {
+                return invalid('Invalid gRPC request.');
+            }
+            const parsed = parsePreparedGrpcCall(prepared);
+            if (!parsed) return invalid('The gRPC call is not valid.');
+            try {
+                return { ok: true, value: await grpcCalls.call(event.sender.id, callId, parsed) };
+            } catch (error) {
+                if (!(error instanceof AppError)) logFailure('grpc:call', error);
+                return {
+                    ok: false,
+                    error: serializeError(error, {
+                        code: 'NETWORK_ERROR',
+                        message: 'The gRPC call could not be made.',
+                    }),
+                };
+            }
+        },
+    );
+
+    ipcMain.on('grpc:cancel', (event, callId: unknown) => {
+        if (!isTrustedSender(event) || typeof callId !== 'string') return;
+        grpcCalls.cancel(event.sender.id, callId);
+    });
+
+    /* ---------- MQTT ---------- */
+
+    /** Runs one MQTT operation; failures become an IpcResult, and only readable ones reach the UI. */
+    const mqttOperation = async <T>(
+        scope: string,
+        event: IpcMainInvokeEvent,
+        id: unknown,
+        run: (senderId: number, connectionId: string) => Promise<T>,
+    ): Promise<IpcResult<T>> => {
+        if (!isTrustedSender(event) || typeof id !== 'string' || !id) {
+            return invalid('Invalid MQTT request.');
+        }
+        try {
+            return { ok: true, value: await run(event.sender.id, id) };
+        } catch (error) {
+            if (!(error instanceof AppError)) logFailure(scope, error);
+            return {
+                ok: false,
+                error: serializeError(error, {
+                    code: 'NETWORK_ERROR',
+                    message: 'The MQTT operation failed.',
+                }),
+            };
+        }
+    };
+
+    ipcMain.handle('mqtt:connect', async (event, id: unknown, prepared: unknown) => {
+        const parsed = parsePreparedMqtt(prepared);
+        if (!parsed) return invalid('The MQTT connection settings are not valid.');
+        return mqttOperation('mqtt:connect', event, id, (senderId, connectionId) =>
+            mqttConnections.connect(senderId, connectionId, parsed),
+        );
+    });
+
+    ipcMain.handle('mqtt:publish', async (event, id: unknown, input: unknown) => {
+        const parsed = parseMqttPublish(input);
+        if (!parsed) return invalid('The message to publish is not valid.');
+        return mqttOperation('mqtt:publish', event, id, (senderId, connectionId) =>
+            mqttConnections.publish(senderId, connectionId, parsed),
+        );
+    });
+
+    ipcMain.handle(
+        'mqtt:subscribe',
+        async (
+            event,
+            id: unknown,
+            subscriptions: unknown,
+        ): Promise<IpcResult<MqttSubscribeResult[]>> => {
+            const parsed = parseMqttSubscriptions(subscriptions);
+            if (!parsed) return invalid('The subscriptions are not valid.');
+            return mqttOperation('mqtt:subscribe', event, id, (senderId, connectionId) =>
+                mqttConnections.subscribe(senderId, connectionId, parsed),
+            );
+        },
+    );
+
+    ipcMain.handle('mqtt:unsubscribe', async (event, id: unknown, topics: unknown) => {
+        const parsed = parseMqttTopics(topics);
+        if (!parsed) return invalid('The topics are not valid.');
+        return mqttOperation('mqtt:unsubscribe', event, id, (senderId, connectionId) =>
+            mqttConnections.unsubscribe(senderId, connectionId, parsed),
+        );
+    });
+
+    ipcMain.handle('mqtt:disconnect', async (event, id: unknown): Promise<void> => {
+        if (!isTrustedSender(event) || typeof id !== 'string') return;
+        await mqttConnections.disconnect(event.sender.id, id);
     });
 
     /* ---------- SSH sessions ---------- */
@@ -372,11 +497,15 @@ export const registerServices = ({ isTrustedSender }: ServiceDeps) => {
     /** Everything a window owns goes away with it, so no orphan socket or shell survives. */
     const releaseSender = (senderId: number) => {
         sockets.disposeForSender(senderId);
+        grpcCalls.disposeForSender(senderId);
+        mqttConnections.disposeForSender(senderId);
         sessions.disposeForSender(senderId);
     };
 
     const disposeAll = async () => {
         sockets.disposeAll();
+        grpcCalls.disposeAll();
+        mqttConnections.disposeAll();
         sessions.disposeAll();
         await tunnels.stopAll();
     };

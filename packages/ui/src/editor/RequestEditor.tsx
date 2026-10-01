@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useCallback, useMemo, useRef, type Ref } from 'react';
+import { useCallback, useContext, useMemo, useRef, type Ref } from 'react';
 import {
     findHeaderConflicts,
     previewGeneratedHeaders,
@@ -12,13 +12,24 @@ import {
 } from '@httpreq/api-client';
 import {
     createKeyValue,
+    PROTOCOLS,
+    protocolOf,
     syncPathVariables,
     type HttpMethod,
     type HttpRequest,
     type KeyValueItem,
+    type ProtocolId,
 } from '@httpreq/shared';
 import { getAncestors, paramsFromUrl, urlWithParams } from '@httpreq/workspace';
 import { copyText } from '../clipboard';
+import { useCapabilities } from '../capabilities';
+import { CodePanel } from '../codegen/CodePanel';
+import { emptyMqtt, useConnectionsStore } from '../connections';
+import { MqttPanel } from '../mqtt/MqttPanel';
+import { MqttContext } from '../mqtt/useMqtt';
+import { effectiveTab, PROTOCOL_VIEWS, protocolPatch } from '../protocols/protocolTabs';
+import { GrpcPanel } from '../protocols/GrpcPanel';
+import { SoapPanel } from '../protocols/SoapPanel';
 import { AuthorizationPanel } from '../auth/AuthorizationPanel';
 import { ScrollableTabsList } from '../ScrollableTabsList';
 import { openExportDialog } from '../export/exportDialogStore';
@@ -33,7 +44,7 @@ import { ScriptsPanel } from './ScriptsPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { SharingPanel } from './SharingPanel';
 import { UrlBar, type SaveState } from './UrlBar';
-import { Badge, Tabs, cx, notifications } from '../kit';
+import { Tabs, cx, notifications } from '../kit';
 
 const COMMON_HEADERS = [
     'Accept',
@@ -102,11 +113,10 @@ export function RequestEditor({
     const workspace = useWorkbenchStore((state) => state.workspace);
     const dirty = useWorkbenchStore((state) => !!state.drafts[requestId]);
     const saveStatus = useWorkbenchStore((state) => state.saveStatus[requestId]);
-    const tab = useWorkbenchStore((state) => state.editorTabs[requestId] ?? 'params');
+    const storedTab = useWorkbenchStore((state) => state.editorTabs[requestId]);
     // Body and Scripts hold Monaco editors. Once opened they stay mounted (hidden) while another
     // tab is shown, so switching back is instant instead of rebuilding the editor.
     const visited = useRef(new Set<EditorTab>());
-    visited.current.add(tab);
     const lastRun = useWorkbenchStore((state) =>
         state.history.find((entry) => entry.requestId === requestId),
     );
@@ -115,6 +125,15 @@ export function RequestEditor({
     const renameNode = useWorkbenchStore((state) => state.renameNode);
     const revealNode = useWorkbenchStore((state) => state.revealNode);
     const duplicateNode = useWorkbenchStore((state) => state.duplicateNode);
+
+    const capabilities = useCapabilities();
+    const mqttApi = useContext(MqttContext);
+    const mqttState = useConnectionsStore((state) => state.mqtt[requestId]) ?? emptyMqtt();
+    const protocol = request ? protocolOf(request) : 'http';
+    const view = PROTOCOL_VIEWS[protocol];
+    const tab = effectiveTab(protocol, storedTab);
+    const has = (name: (typeof view.tabs)[number]) => view.tabs.includes(name);
+    visited.current.add(tab);
 
     const onChange = useCallback(
         (patch: Partial<HttpRequest>) => editRequest(requestId, patch),
@@ -159,6 +178,11 @@ export function RequestEditor({
 
     const copyCurl = useCallback(async () => {
         if (!request) return;
+        // cURL cannot express gRPC or MQTT: the Code tab offers the right tools for them.
+        if (protocolOf(request) === 'grpc' || protocolOf(request) === 'mqtt') {
+            setEditorTab(requestId, 'code');
+            return;
+        }
         try {
             await copyText(await buildCurl(request));
             notifications.show({ color: 'teal', message: 'cURL command copied to the clipboard.' });
@@ -169,7 +193,7 @@ export function RequestEditor({
                 message: (error as Error).message,
             });
         }
-    }, [buildCurl, request]);
+    }, [buildCurl, request, requestId, setEditorTab]);
 
     if (!request || !effectiveAuth) return null;
 
@@ -215,6 +239,25 @@ export function RequestEditor({
                 onRename={(name) => renameNode(requestId, name)}
             />
             <UrlBar
+                protocol={protocol}
+                onProtocolChange={(next: ProtocolId) => {
+                    onChange(protocolPatch(request, next));
+                    setEditorTab(requestId, PROTOCOL_VIEWS[next].defaultTab);
+                }}
+                unavailableProtocols={(Object.keys(PROTOCOLS) as ProtocolId[]).filter(
+                    (id) => PROTOCOLS[id].desktopOnly && !capabilities[id as 'grpc' | 'mqtt'],
+                )}
+                connection={
+                    protocol === 'mqtt' && mqttApi
+                        ? {
+                              phase:
+                                  mqttState.status === 'error' ? 'disconnected' : mqttState.status,
+                              onConnect: () => void mqttApi.connect(request),
+                              onDisconnect: () => void mqttApi.disconnect(requestId),
+                              disabled: !request.url.trim() || !mqttApi.available,
+                          }
+                        : undefined
+                }
                 method={request.method}
                 url={request.url}
                 onMethodChange={(method: HttpMethod) => onChange({ method })}
@@ -246,35 +289,70 @@ export function RequestEditor({
                 className="min-h-0 flex-1"
             >
                 <ScrollableTabsList active={tab} aria-label="Request editor">
-                    <Tabs.Tab value="overview">Overview</Tabs.Tab>
-                    <Tabs.Tab value="params">
-                        Params <Count value={paramCount} />
-                    </Tabs.Tab>
-                    <Tabs.Tab value="body">
-                        Body{' '}
-                        {request.body.mode !== 'none' && (
-                            <span className={DOT} aria-label="has body" />
-                        )}
-                    </Tabs.Tab>
-                    <Tabs.Tab value="headers">
-                        Headers <Count value={headerCount} />
-                    </Tabs.Tab>
-                    <Tabs.Tab value="authorization">
-                        Authorization{' '}
-                        {request.auth.type !== 'none' && request.auth.type !== 'inherit' && (
-                            <span className={DOT} aria-label="configured" />
-                        )}
-                    </Tabs.Tab>
-                    <Tabs.Tab value="scripts">
-                        Scripts{' '}
-                        <Badge size="xs" variant="light" color="gray" className="ml-0.5">
-                            Soon
-                        </Badge>
-                    </Tabs.Tab>
-                    <Tabs.Tab value="sharing">Sharing</Tabs.Tab>
-                    <Tabs.Tab value="settings">Settings</Tabs.Tab>
+                    {has('protocol') && (
+                        <Tabs.Tab value="protocol">{view.protocolTabLabel}</Tabs.Tab>
+                    )}
+                    {has('overview') && protocol === 'http' && (
+                        <Tabs.Tab value="overview">Overview</Tabs.Tab>
+                    )}
+                    {has('params') && (
+                        <Tabs.Tab value="params">
+                            Params <Count value={paramCount} />
+                        </Tabs.Tab>
+                    )}
+                    {has('body') && (
+                        <Tabs.Tab value="body">
+                            Body{' '}
+                            {request.body.mode !== 'none' && (
+                                <span className={DOT} aria-label="has body" />
+                            )}
+                        </Tabs.Tab>
+                    )}
+                    {has('headers') && (
+                        <Tabs.Tab value="headers">
+                            {protocol === 'grpc' ? 'Metadata' : 'Headers'}{' '}
+                            <Count value={headerCount} />
+                        </Tabs.Tab>
+                    )}
+                    {has('authorization') && (
+                        <Tabs.Tab value="authorization">
+                            Authorization{' '}
+                            {request.auth.type !== 'none' && request.auth.type !== 'inherit' && (
+                                <span className={DOT} aria-label="configured" />
+                            )}
+                        </Tabs.Tab>
+                    )}
+                    {has('scripts') && (
+                        <Tabs.Tab value="scripts">
+                            Scripts{' '}
+                            {(request.scripts.preRequest.trim() ||
+                                request.scripts.postResponse.trim() ||
+                                request.scripts.tests.trim()) && (
+                                <span className={DOT} aria-label="has scripts" />
+                            )}
+                        </Tabs.Tab>
+                    )}
+                    {has('code') && <Tabs.Tab value="code">Code</Tabs.Tab>}
+                    {has('sharing') && <Tabs.Tab value="sharing">Sharing</Tabs.Tab>}
+                    {has('settings') && <Tabs.Tab value="settings">Settings</Tabs.Tab>}
                 </ScrollableTabsList>
 
+                {has('protocol') && (
+                    <Tabs.Panel
+                        value="protocol"
+                        keepMounted={visited.current.has('protocol')}
+                        className={cx(PANEL, 'flex flex-col')}
+                    >
+                        {protocol === 'soap' && <SoapPanel request={request} onChange={onChange} />}
+                        {protocol === 'grpc' && <GrpcPanel request={request} onChange={onChange} />}
+                        {protocol === 'mqtt' && <MqttPanel request={request} onChange={onChange} />}
+                    </Tabs.Panel>
+                )}
+                {has('code') && (
+                    <Tabs.Panel value="code" className={cx(PANEL, 'flex flex-col')}>
+                        {tab === 'code' && <CodePanel request={request} />}
+                    </Tabs.Panel>
+                )}
                 <Tabs.Panel value="overview" className={PANEL}>
                     <OverviewPanel
                         request={request}

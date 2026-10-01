@@ -3,15 +3,23 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-export * from './equality';
 export * from './capabilities';
+export * from './codegen';
+export * from './equality';
+export * from './grpc';
 export * from './model';
+export * from './mqtt';
 export * from './pathVariables';
+export * from './protocols';
+export * from './scripts';
+export * from './soap';
 export * from './ssh';
 export * from './validation';
 export * from './websocket';
 
 import type { HistoryEntry, HttpMethod, HttpRequest, Workspace, WorkspaceMeta } from './model';
+import type { GrpcBridge } from './grpc';
+import type { MqttBridge } from './mqtt';
 import type { SshBridge, TunnelBridge } from './ssh';
 import type { PreparedWebSocket, WebSocketEvent } from './websocket';
 
@@ -88,6 +96,8 @@ export interface HttpResponse {
     bytes?: Uint8Array;
     /** The body is not text; it can be saved but not shown in the body viewer. */
     binary?: boolean;
+    /** Set for gRPC responses: the call's status, which the HTTP-shaped fields above summarize. */
+    grpc?: { code: number; name: string; details: string; trailers: Record<string, string> };
     /** Set for `text/event-stream` responses: the events received, in order. */
     stream?: {
         events: SseEvent[];
@@ -372,4 +382,6 @@ export interface HttpReqBridge {
     webSocket?: WebSocketBridge;
     ssh?: SshBridge;
     tunnels?: TunnelBridge;
+    grpc?: GrpcBridge;
+    mqtt?: MqttBridge;
 }

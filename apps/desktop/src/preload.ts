@@ -7,13 +7,17 @@ import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import {
     isDesktopUpdateState,
     isMenuCommand,
+    isMqttStatus,
     isSshStatus,
     type DesktopBridge,
     type DesktopWindowState,
+    type GrpcBridge,
     type HostKeyPrompt,
     type HttpStreamMessage,
     type HttpReqBridge,
     type MenuCommand,
+    type MqttBridge,
+    type MqttEvent,
     type SshBridge,
     type SshSessionEvent,
     type UpdatesBridge,
@@ -69,6 +73,20 @@ const isWebSocketEvent = (value: unknown): value is WebSocketEvent => {
     if (!value || typeof value !== 'object') return false;
     const type = (value as { type?: unknown }).type;
     return type === 'open' || type === 'message' || type === 'close' || type === 'error';
+};
+
+const isMqttEvent = (value: unknown): value is MqttEvent => {
+    if (!value || typeof value !== 'object') return false;
+    const event = value as { type?: unknown; status?: unknown };
+    switch (event.type) {
+        case 'status':
+            return isMqttStatus(event.status);
+        case 'message':
+        case 'error':
+            return true;
+        default:
+            return false;
+    }
 };
 
 const isHttpStreamMessage = (value: unknown): value is HttpStreamMessage => {
@@ -144,6 +162,20 @@ const webSocket: WebSocketBridge = {
     onEvent: (listener) => subscribeKeyed('ws:event', listener, isWebSocketEvent),
 };
 
+const grpc: GrpcBridge = {
+    call: (callId, prepared) => ipcRenderer.invoke('grpc:call', callId, prepared),
+    cancel: (callId) => ipcRenderer.send('grpc:cancel', callId),
+};
+
+const mqtt: MqttBridge = {
+    connect: (id, prepared) => ipcRenderer.invoke('mqtt:connect', id, prepared),
+    publish: (id, input) => ipcRenderer.invoke('mqtt:publish', id, input),
+    subscribe: (id, subscriptions) => ipcRenderer.invoke('mqtt:subscribe', id, subscriptions),
+    unsubscribe: (id, topics) => ipcRenderer.invoke('mqtt:unsubscribe', id, topics),
+    disconnect: (id) => ipcRenderer.invoke('mqtt:disconnect', id),
+    onEvent: (listener) => subscribeKeyed('mqtt:event', listener, isMqttEvent),
+};
+
 const ssh: SshBridge = {
     listSessions: () => ipcRenderer.invoke('ssh:list'),
     connect: (options) => ipcRenderer.invoke('ssh:connect', options),
@@ -178,6 +210,8 @@ const bridge: HttpReqBridge = {
     onHttpStream: (listener) => subscribeKeyed('http:stream', listener, isHttpStreamMessage),
     desktop,
     webSocket,
+    grpc,
+    mqtt,
     ssh,
     tunnels,
 };

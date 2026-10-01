@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { createSshProfile } from '@httpreq/shared';
+import { createSshProfile, type SshErrorInfo, type SshStatus } from '@httpreq/shared';
 import { createWorkspace } from '@httpreq/workspace';
 import { act } from 'react';
 import { resetConnections, useConnectionsStore } from '../connections';
@@ -97,7 +97,7 @@ describe('the connect button', () => {
         mount(ssh);
 
         const connect = screen.getByRole('button', { name: 'Connect to Prod' });
-        expect(connect).toHaveAttribute('data-state', 'idle');
+        expect(connect).toHaveAttribute('data-state', 'disconnected');
         fireEvent.click(connect);
         expect(ssh.open).toHaveBeenCalledWith(expect.objectContaining({ id: profile.id }));
 
@@ -113,11 +113,72 @@ describe('the connect button', () => {
             }),
         );
         const disconnect = await screen.findByRole('button', { name: 'Disconnect from Prod' });
-        expect(disconnect).toHaveAttribute('data-state', 'active');
+        expect(disconnect).toHaveAttribute('data-state', 'connected');
         fireEvent.click(disconnect);
         expect(ssh.disconnect).toHaveBeenCalledWith('s1');
 
         act(() => useConnectionsStore.getState().patchSession('s1', { status: 'disconnected' }));
         expect(await screen.findByRole('button', { name: 'Connect to Prod' })).toBeInTheDocument();
+    });
+
+    const session = (profileId: string, status: SshStatus, error: SshErrorInfo | null = null) => ({
+        sessionId: 's1',
+        profileId,
+        name: 'Prod',
+        status,
+        error,
+        startedAt: null,
+        generation: 1,
+    });
+
+    it('shows a spinner, not Stop, while the connection is being established', async () => {
+        const profile = createSshProfile('Prod');
+        store().createSshProfile(profile);
+        resetConnections();
+        const ssh = api();
+        mount(ssh);
+
+        act(() => useConnectionsStore.getState().setSession(session(profile.id, 'connecting')));
+        const busy = await screen.findByRole('button', { name: 'Connecting to Prod' });
+        expect(busy).toHaveAttribute('data-state', 'connecting');
+        expect(busy).toBeDisabled();
+        expect(screen.queryByRole('button', { name: /Disconnect from Prod/ })).toBeNull();
+        fireEvent.click(busy);
+        expect(ssh.open).not.toHaveBeenCalled();
+        expect(ssh.disconnect).not.toHaveBeenCalled();
+
+        act(() => useConnectionsStore.getState().patchSession('s1', { status: 'connected' }));
+        expect(await screen.findByRole('button', { name: 'Disconnect from Prod' })).toBeEnabled();
+    });
+
+    it('keeps the spinner while disconnecting, then offers Play again', async () => {
+        const profile = createSshProfile('Prod');
+        store().createSshProfile(profile);
+        resetConnections();
+        mount(api());
+
+        act(() => useConnectionsStore.getState().setSession(session(profile.id, 'disconnecting')));
+        const busy = await screen.findByRole('button', { name: 'Disconnecting from Prod' });
+        expect(busy).toBeDisabled();
+
+        act(() => useConnectionsStore.getState().patchSession('s1', { status: 'disconnected' }));
+        expect(await screen.findByRole('button', { name: 'Connect to Prod' })).toBeEnabled();
+    });
+
+    it('returns to Play and shows the error when the connection fails', async () => {
+        const profile = createSshProfile('Prod');
+        store().createSshProfile(profile);
+        resetConnections();
+        mount(api());
+
+        act(() => useConnectionsStore.getState().setSession(session(profile.id, 'connecting')));
+        act(() =>
+            useConnectionsStore.getState().patchSession('s1', {
+                status: 'error',
+                error: { code: 'SSH_HOST_UNREACHABLE', message: 'The connection was refused.' },
+            }),
+        );
+        expect(await screen.findByRole('button', { name: 'Connect to Prod' })).toBeEnabled();
+        expect(screen.getByRole('alert')).toHaveTextContent('The connection was refused.');
     });
 });

@@ -28,7 +28,7 @@ const fakeContents = () => {
 describe('the content security policy', () => {
     it('blocks inline scripts in production and plugins, base rewrites and framing always', () => {
         const production = buildContentSecurityPolicy(false);
-        expect(production).toContain("script-src 'self' blob:");
+        expect(production).toContain("script-src 'self' 'wasm-unsafe-eval' blob:");
         expect(production).not.toContain("'unsafe-inline' blob:");
         for (const directive of [
             "object-src 'none'",
@@ -41,7 +41,7 @@ describe('the content security policy', () => {
 
     it('allows the inline preamble Vite needs in development only', () => {
         expect(buildContentSecurityPolicy(true)).toContain(
-            "script-src 'self' 'unsafe-inline' blob:",
+            "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:",
         );
     });
 });

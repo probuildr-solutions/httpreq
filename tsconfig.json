@@ -1,12 +1,32 @@
 {
     "files": [],
     "references": [
-        { "path": "packages/shared" },
-        { "path": "packages/api-client" },
-        { "path": "packages/workspace" },
-        { "path": "packages/storage" },
-        { "path": "packages/ui" },
-        { "path": "apps/web" },
-        { "path": "apps/desktop" }
+        {
+            "path": "packages/shared"
+        },
+        {
+            "path": "packages/api-client"
+        },
+        {
+            "path": "packages/scripting"
+        },
+        {
+            "path": "packages/codegen"
+        },
+        {
+            "path": "packages/workspace"
+        },
+        {
+            "path": "packages/storage"
+        },
+        {
+            "path": "packages/ui"
+        },
+        {
+            "path": "apps/web"
+        },
+        {
+            "path": "apps/desktop"
+        }
     ]
 }

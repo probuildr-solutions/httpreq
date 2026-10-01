@@ -21,7 +21,7 @@ import {
     type KeyboardEvent,
 } from 'react';
 import { describeResponse, responseBytes, suggestedFileName } from '@httpreq/api-client';
-import type { HttpResponse } from '@httpreq/shared';
+import type { HttpResponse, ScriptReport } from '@httpreq/shared';
 import { formatBytes } from './attachments';
 import { BinaryView } from './BinaryView';
 import { EditorLoading } from './editor/EditorLoading';
@@ -46,6 +46,8 @@ import {
 import { ResponseSearch } from './ResponseSearch';
 import { ScrollableTabsList } from './ScrollableTabsList';
 import type { LiveStream } from './store';
+import { TestResults } from './scripts/TestResults';
+import { hasScriptOutput, testSummary } from './scripts/testSummary';
 import { StreamView } from './StreamView';
 
 const ResponseViewer = lazy(() => import('./ResponseViewer'));
@@ -75,7 +77,7 @@ const responseId = (response: HttpResponse) => {
 };
 
 type BodyView = 'pretty' | 'raw';
-type ResponseTab = 'body' | 'headers';
+type ResponseTab = 'body' | 'headers' | 'tests';
 
 const DEFAULT_OPTIONS = { wordWrap: 'on', folding: true } as const;
 const LARGE_OPTIONS = { wordWrap: 'off', folding: false } as const;
@@ -130,9 +132,11 @@ interface Props {
     loading: boolean;
     /** Stops an open stream. */
     onStop?: () => void;
+    /** What the request's scripts produced for this response (tests, console, errors). */
+    report?: ScriptReport;
 }
 
-export function ResponsePanel({ response, stream, loading, onStop }: Props) {
+export function ResponsePanel({ response, stream, loading, onStop, report }: Props) {
     const colorScheme = useComputedColorScheme();
     const [view, setView] = useState<BodyView>('pretty');
     const [tab, setTab] = useState<ResponseTab>('body');
@@ -214,7 +218,10 @@ export function ResponsePanel({ response, stream, loading, onStop }: Props) {
                 : /html/i.test(head.contentType)
                   ? 'html'
                   : 'plaintext';
-    const canSearch = !isBinary;
+    const showTests = hasScriptOutput(report);
+    const failedTests = report?.tests.some((test) => !test.passed) ?? false;
+    const grpc = response?.grpc;
+    const canSearch = !isBinary && tab !== 'tests';
     const searchOpen = searching && canSearch && tab === 'body';
     const activeQuery = searchOpen ? query : '';
 
@@ -242,6 +249,19 @@ export function ResponsePanel({ response, stream, loading, onStop }: Props) {
                         Headers{' '}
                         <span className="ml-0.5 text-dimmed tabular-nums">{headerCount}</span>
                     </Tabs.Tab>
+                    {showTests && (
+                        <Tabs.Tab value="tests">
+                            Tests{' '}
+                            <span
+                                className={cx(
+                                    'ml-0.5 tabular-nums',
+                                    failedTests ? 'text-red-6' : 'text-dimmed',
+                                )}
+                            >
+                                {testSummary(report)}
+                            </span>
+                        </Tabs.Tab>
+                    )}
                 </ScrollableTabsList>
                 <div className="flex min-w-0 flex-[1_1_auto] items-center justify-end gap-2">
                     {kind && !isStream && !isBinary && (
@@ -264,11 +284,13 @@ export function ResponsePanel({ response, stream, loading, onStop }: Props) {
                         aria-label="Response summary"
                     >
                         <Badge
-                            color={head.status < 400 ? 'teal' : 'red'}
+                            color={(grpc ? grpc.code === 0 : head.status < 400) ? 'teal' : 'red'}
                             variant="light"
                             radius="xs"
                         >
-                            {head.status} {head.statusText}
+                            {grpc
+                                ? `gRPC ${grpc.code} ${grpc.name}`
+                                : `${head.status} ${head.statusText}`}
                         </Badge>
                         {stream && (
                             <Badge
@@ -454,6 +476,11 @@ export function ResponsePanel({ response, stream, loading, onStop }: Props) {
                     </Table.Tbody>
                 </Table>
             </Tabs.Panel>
+            {showTests && report && (
+                <Tabs.Panel value="tests" className="flex min-h-0 flex-1 flex-col">
+                    <TestResults report={report} />
+                </Tabs.Panel>
+            )}
         </Tabs>
     );
 }

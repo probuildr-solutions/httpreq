@@ -123,3 +123,16 @@ describe('LocalHistoryRepository', () => {
         expect((await repository.list('w')).map((entry) => entry.id)).toEqual(['3', '2']);
     });
 });
+
+describe('protocol secrets', () => {
+    it('never persists the MQTT TLS client key', async () => {
+        const { sanitizeRequest } = await import('./sanitize');
+        const { createEmptyRequest, createMqttConfig } = await import('@httpreq/shared');
+        const mqtt = createMqttConfig();
+        mqtt.tls.clientKey = '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----';
+        mqtt.tls.caCertificate = 'CA';
+        const saved = sanitizeRequest({ ...createEmptyRequest(), protocol: 'mqtt', mqtt });
+        expect(JSON.stringify(saved)).not.toContain('PRIVATE KEY');
+        expect(saved.mqtt?.tls.caCertificate).toBe('CA');
+    });
+});

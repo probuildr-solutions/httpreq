@@ -12,6 +12,17 @@ import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 import 'monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution';
 import 'monaco-editor/esm/vs/basic-languages/xml/xml.contribution';
 import 'monaco-editor/esm/vs/basic-languages/html/html.contribution';
+// Languages the code generator can target, plus protobuf for gRPC definitions.
+import 'monaco-editor/esm/vs/basic-languages/csharp/csharp.contribution';
+import 'monaco-editor/esm/vs/basic-languages/go/go.contribution';
+import 'monaco-editor/esm/vs/basic-languages/java/java.contribution';
+import 'monaco-editor/esm/vs/basic-languages/php/php.contribution';
+import 'monaco-editor/esm/vs/basic-languages/powershell/powershell.contribution';
+import 'monaco-editor/esm/vs/basic-languages/protobuf/protobuf.contribution';
+import 'monaco-editor/esm/vs/basic-languages/python/python.contribution';
+import 'monaco-editor/esm/vs/basic-languages/ruby/ruby.contribution';
+import 'monaco-editor/esm/vs/basic-languages/shell/shell.contribution';
+import 'monaco-editor/esm/vs/basic-languages/swift/swift.contribution';
 
 (
     globalThis as typeof globalThis & {

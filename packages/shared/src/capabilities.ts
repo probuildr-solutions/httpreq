@@ -18,6 +18,10 @@ export interface PlatformCapabilities {
     secureCredentialStorage: boolean;
     /** WebSocket handshake headers; browsers forbid them. */
     webSocketHeaders: boolean;
+    /** Native gRPC (HTTP/2 with trailers) needs a process that can open raw sockets. */
+    grpc: boolean;
+    /** MQTT over TCP/TLS likewise. */
+    mqtt: boolean;
 }
 
 export const WEB_CAPABILITIES: PlatformCapabilities = {
@@ -27,6 +31,8 @@ export const WEB_CAPABILITIES: PlatformCapabilities = {
     nativeFilePicker: false,
     secureCredentialStorage: false,
     webSocketHeaders: false,
+    grpc: false,
+    mqtt: false,
 };
 
 export const DESKTOP_CAPABILITIES: PlatformCapabilities = {
@@ -36,6 +42,8 @@ export const DESKTOP_CAPABILITIES: PlatformCapabilities = {
     nativeFilePicker: true,
     secureCredentialStorage: true,
     webSocketHeaders: true,
+    grpc: true,
+    mqtt: true,
 };
 
 /**
@@ -49,6 +57,8 @@ export const detectCapabilities = (
               ssh?: unknown;
               tunnels?: unknown;
               webSocket?: unknown;
+              grpc?: unknown;
+              mqtt?: unknown;
           }
         | undefined,
 ): PlatformCapabilities => {
@@ -60,5 +70,7 @@ export const detectCapabilities = (
         nativeFilePicker: !!bridge.ssh,
         secureCredentialStorage: !!bridge.ssh,
         webSocketHeaders: !!bridge.webSocket,
+        grpc: !!bridge.grpc,
+        mqtt: !!bridge.mqtt,
     };
 };

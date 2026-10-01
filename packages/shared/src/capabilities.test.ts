@@ -13,13 +13,24 @@ describe('detectCapabilities', () => {
     });
 
     it('gives a complete desktop build everything', () => {
-        expect(detectCapabilities({ desktop: {}, ssh: {}, tunnels: {}, webSocket: {} })).toEqual({
+        expect(
+            detectCapabilities({
+                desktop: {},
+                ssh: {},
+                tunnels: {},
+                webSocket: {},
+                grpc: {},
+                mqtt: {},
+            }),
+        ).toEqual({
             desktop: true,
             ssh: true,
             tunneling: true,
             nativeFilePicker: true,
             secureCredentialStorage: true,
             webSocketHeaders: true,
+            grpc: true,
+            mqtt: true,
         });
     });
 
@@ -32,6 +43,8 @@ describe('detectCapabilities', () => {
             nativeFilePicker: false,
             secureCredentialStorage: false,
             webSocketHeaders: true,
+            grpc: false,
+            mqtt: false,
         });
     });
 

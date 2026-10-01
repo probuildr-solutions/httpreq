@@ -28,7 +28,7 @@ import {
 } from 'react';
 import type { DropPosition } from '@httpreq/workspace';
 import { ActionIcon, Menu, Text, TextInput, Tooltip, cx } from '../kit';
-import { isLeafRow, methodText, WEBSOCKET_TEXT } from '../methods';
+import { isLeafRow, requestBadge, WEBSOCKET_TEXT } from '../methods';
 import type { TreeRow } from './rows';
 import { treeItemId } from './treeIds';
 import { RowCheckbox } from './Selection';
@@ -200,12 +200,8 @@ export const ExplorerRow = memo(function ExplorerRow({
                 {container && row.hasChildren && <IconChevronRight size={13} />}
             </span>
             {row.kind === 'request' ? (
-                <span className={cx(METHOD_LABEL, methodText[row.method!])}>
-                    {row.method === 'DELETE'
-                        ? 'DEL'
-                        : row.method === 'OPTIONS'
-                          ? 'OPT'
-                          : row.method}
+                <span className={cx(METHOD_LABEL, requestBadge(row.method, row.protocol).color)}>
+                    {requestBadge(row.method, row.protocol).label}
                 </span>
             ) : row.kind === 'websocket' ? (
                 <span className={cx(METHOD_LABEL, WEBSOCKET_TEXT)}>WS</span>

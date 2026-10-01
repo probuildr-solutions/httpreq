@@ -13,14 +13,34 @@ import {
     IconTerminal2,
 } from '@tabler/icons-react';
 import type { Ref } from 'react';
-import { HTTP_METHODS, type HttpMethod } from '@httpreq/shared';
+import {
+    HTTP_METHODS,
+    PROTOCOL_IDS,
+    PROTOCOLS,
+    type HttpMethod,
+    type ProtocolId,
+} from '@httpreq/shared';
 import { methodText } from '../methods';
 import { VariableInput } from './VariableInput';
 import { ActionIcon, Button, Menu, Select, Tooltip, cx } from '../kit';
 
+/** Where a session-style protocol (MQTT) is in its connection lifecycle. */
+export interface ConnectionControl {
+    phase: 'disconnected' | 'connecting' | 'connected' | 'disconnecting';
+    onConnect: () => void;
+    onDisconnect: () => void;
+    disabled?: boolean;
+}
+
 export type SaveState = 'saved' | 'modified' | 'saving' | 'failed';
 
 interface Props {
+    protocol: ProtocolId;
+    onProtocolChange: (protocol: ProtocolId) => void;
+    /** Protocols the platform can run; the others are shown but cannot be chosen. */
+    unavailableProtocols?: ProtocolId[];
+    /** Replaces Send with Connect/Disconnect for session protocols. */
+    connection?: ConnectionControl;
     method: HttpMethod;
     url: string;
     onMethodChange: (method: HttpMethod) => void;
@@ -54,6 +74,10 @@ const saveLabels: Record<SaveState, string> = {
  * the window's).
  */
 export function UrlBar({
+    protocol,
+    onProtocolChange,
+    unavailableProtocols = [],
+    connection,
     method,
     url,
     onMethodChange,
@@ -83,38 +107,59 @@ export function UrlBar({
         <div className="flex items-center gap-1.5 px-2.5 pt-1.5 pb-2 @max-[420px]/request-editor:flex-wrap">
             <div className="flex h-8 min-w-0 flex-1 rounded-sm border border-line bg-field focus-within:border-primary @max-[420px]/request-editor:basis-full">
                 <Select
-                    aria-label="HTTP method"
-                    value={method}
-                    data={HTTP_METHODS as unknown as string[]}
+                    aria-label="Protocol"
+                    value={protocol}
+                    data={PROTOCOL_IDS.map((id) => ({
+                        value: id,
+                        label:
+                            PROTOCOLS[id].label +
+                            (unavailableProtocols.includes(id) ? ' (desktop app)' : ''),
+                    }))}
                     withCheckIcon={false}
                     variant="unstyled"
                     size="xs"
-                    menuWidth={120}
-                    onChange={(value) => value && onMethodChange(value as HttpMethod)}
-                    renderOption={(option) => (
-                        <span
-                            className={cx(
-                                'font-mono text-[12.5px] font-bold',
-                                methodText[option.value as HttpMethod],
-                            )}
-                        >
-                            {option.value}
-                        </span>
-                    )}
-                    // Each verb is shown in its own colour, in the closed control too.
-                    inputClassName={cx(
-                        'h-[30px] font-mono text-[12.5px] font-bold focus-within:shadow-none!',
-                        methodText[method],
-                    )}
-                    className="flex-[0_0_96px] border-r border-line @max-[380px]/request-editor:flex-[0_0_78px]"
+                    menuWidth={170}
+                    onChange={(value) => value && onProtocolChange(value as ProtocolId)}
+                    inputClassName="h-[30px] text-[12px] font-semibold text-primary-text focus-within:shadow-none!"
+                    className="flex-[0_0_74px] border-r border-line @max-[380px]/request-editor:flex-[0_0_64px]"
                 />
+                {protocol === 'http' && (
+                    <>
+                        <Select
+                            aria-label="HTTP method"
+                            value={method}
+                            data={HTTP_METHODS as unknown as string[]}
+                            withCheckIcon={false}
+                            variant="unstyled"
+                            size="xs"
+                            menuWidth={120}
+                            onChange={(value) => value && onMethodChange(value as HttpMethod)}
+                            renderOption={(option) => (
+                                <span
+                                    className={cx(
+                                        'font-mono text-[12.5px] font-bold',
+                                        methodText[option.value as HttpMethod],
+                                    )}
+                                >
+                                    {option.value}
+                                </span>
+                            )}
+                            // Each verb is shown in its own colour, in the closed control too.
+                            inputClassName={cx(
+                                'h-[30px] font-mono text-[12.5px] font-bold focus-within:shadow-none!',
+                                methodText[method],
+                            )}
+                            className="flex-[0_0_96px] border-r border-line @max-[380px]/request-editor:flex-[0_0_78px]"
+                        />
+                    </>
+                )}
                 <VariableInput
                     ref={urlRef}
                     className="flex-1 self-center focus-within:shadow-none!"
                     variant="cell"
-                    aria-label="Request URL"
+                    aria-label={protocol === 'mqtt' ? 'Broker URL' : 'Request URL'}
                     aria-keyshortcuts={focusShortcut}
-                    placeholder="{{base_url}}/users or https://api.example.com/users"
+                    placeholder={PROTOCOLS[protocol].placeholderUrl}
                     value={url}
                     onChange={onUrlChange}
                     onKeyDown={(event) => {
@@ -156,7 +201,31 @@ export function UrlBar({
                 </Button>
             </Tooltip>
 
-            {sending ? (
+            {connection ? (
+                <Button
+                    color={connection.phase === 'connected' ? 'red' : undefined}
+                    variant={connection.phase === 'connected' ? 'light' : 'filled'}
+                    loading={
+                        connection.phase === 'connecting' || connection.phase === 'disconnecting'
+                    }
+                    disabled={connection.disabled}
+                    data-state={connection.phase}
+                    onClick={
+                        connection.phase === 'connected'
+                            ? connection.onDisconnect
+                            : connection.onConnect
+                    }
+                    className="h-8 flex-none @max-[420px]/request-editor:flex-1"
+                >
+                    {connection.phase === 'connected'
+                        ? 'Disconnect'
+                        : connection.phase === 'connecting'
+                          ? 'Connecting…'
+                          : connection.phase === 'disconnecting'
+                            ? 'Disconnecting…'
+                            : 'Connect'}
+                </Button>
+            ) : sending ? (
                 <Button
                     color="red"
                     variant="light"

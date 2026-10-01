@@ -42,8 +42,10 @@ import {
     type WebSocketSettings,
     type Workspace,
 } from '@httpreq/shared';
+import { normalizeProtocolFields } from './protocols';
 import { urlWithParams } from './query';
 
+export * from './protocols';
 export * from './query';
 export * from './tree';
 export * from './workspaces';
@@ -190,6 +192,7 @@ export const normalizeRequest = (
         id: id(value.id),
         name: str(value.name).trim() || 'Untitled Request',
         parentId,
+        ...normalizeProtocolFields(value),
         method: isHttpMethod(value.method) ? value.method : 'GET',
         url: str(value.url),
         params: list(value.params).map(normalizeKeyValue),

@@ -14,6 +14,10 @@ export const sanitizeRequest = (request: HttpRequest): HttpRequest => ({
     ...request,
     auth: serializeAuth(request.auth),
     headers: request.headers.map((item: KeyValueItem) => withoutSecretValue(item)),
+    // The MQTT TLS client key is the one literal secret outside authorization; it stays in memory.
+    ...(request.mqtt
+        ? { mqtt: { ...request.mqtt, tls: { ...request.mqtt.tls, clientKey: '' } } }
+        : {}),
 });
 
 export const sanitizeWebSocketRequest = (request: WebSocketRequest): WebSocketRequest => ({
