@@ -18,6 +18,7 @@ import {
     type HistoryEntry,
     type HttpRequest,
     type HttpResponse,
+    type ScriptReport,
     type SseEvent,
     type StreamHead,
     type RequestKind,
@@ -55,7 +56,9 @@ export const EDITOR_TABS = [
     'body',
     'headers',
     'authorization',
+    'protocol',
     'scripts',
+    'code',
     'sharing',
     'settings',
 ] as const;
@@ -89,6 +92,8 @@ export interface WorkbenchState
     drafts: Record<string, HttpRequest>;
     activeRequestId: string | null;
     responses: Record<string, HttpResponse | undefined>;
+    /** What the scripts of the last send of a request produced (tests, logs), by request id. */
+    scriptReports: Record<string, ScriptReport | undefined>;
     /** Streams (SSE) that are open right now, keyed by request id; gone once the stream ends. */
     streams: Record<string, LiveStream | undefined>;
     saveStatus: Record<string, SaveStatus | undefined>;
@@ -144,6 +149,9 @@ export interface WorkbenchState
     ) => void;
     setSaveStatus: (id: string, status: SaveStatus | undefined) => void;
     setResponse: (id: string, response: HttpResponse) => void;
+    setScriptReport: (id: string, report: ScriptReport | undefined) => void;
+    /** Applies the environment variables a script set or removed to the active environment. */
+    applyScriptEnvironment: (changes: ScriptReport['environmentChanges']) => void;
     startStream: (id: string, head: StreamHead) => void;
     appendStreamEvents: (id: string, events: SseEvent[]) => void;
     endStream: (id: string) => void;
@@ -310,6 +318,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get, api) => ({
     drafts: {},
     activeRequestId: initial.openRequestIds[0] ?? null,
     responses: {},
+    scriptReports: {},
     streams: {},
     saveStatus: {},
     history: [],
@@ -343,6 +352,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get, api) => ({
             switching: false,
             activeRequestId: active,
             responses: {},
+            scriptReports: {},
             streams: {},
             saveStatus: {},
             // Terminals belong to the workspace that opened them and do not survive a switch.
@@ -543,6 +553,27 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get, api) => ({
     setResponse: (id, response) =>
         set((state) => ({ responses: { ...state.responses, [id]: response } })),
 
+    setScriptReport: (id, report) =>
+        set((state) => ({
+            scriptReports: report
+                ? { ...state.scriptReports, [id]: report }
+                : without(state.scriptReports, [id]),
+        })),
+
+    applyScriptEnvironment: ({ set: assigned, unset }) => {
+        for (const [key, value] of Object.entries(assigned)) {
+            get().setEnvironmentVariable(key, value, false);
+        }
+        const environment = activeEnvironment(get().workspace);
+        if (environment && unset.length) {
+            get().updateEnvironment(environment.id, {
+                variables: environment.variables.filter(
+                    (variable) => !unset.includes(variable.key),
+                ),
+            });
+        }
+    },
+
     startStream: (id, head) =>
         set((state) => ({ streams: { ...state.streams, [id]: { head, events: [], dropped: 0 } } })),
 
@@ -735,6 +766,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get, api) => ({
                 workspace,
                 drafts: without(state.drafts, removedRequestIds),
                 responses: without(state.responses, removedRequestIds),
+                scriptReports: without(state.scriptReports, removedRequestIds),
                 saveStatus: without(state.saveStatus, removedRequestIds),
                 activeRequestId: activeGone
                     ? (open[Math.min(previousIndex, open.length - 1)] ?? null)

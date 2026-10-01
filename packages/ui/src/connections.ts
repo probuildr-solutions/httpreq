@@ -6,6 +6,9 @@
 import { create } from 'zustand';
 import {
     createId,
+    type MqttMessage,
+    type MqttQos,
+    type MqttStatus,
     type SshErrorInfo,
     type SshStatus,
     type TunnelRuntimeState,
@@ -34,6 +37,16 @@ export interface SocketState {
     reconnectAttempts: number;
 }
 
+export interface MqttState {
+    status: MqttStatus;
+    connectedAt: string | null;
+    messages: MqttMessage[];
+    /** Last failure, shown until the next successful connect. */
+    error: string | null;
+    /** Topic filters the broker has accepted on this connection, with their granted QoS. */
+    subscriptions: Record<string, MqttQos>;
+}
+
 export interface SshSessionState {
     sessionId: string;
     profileId: string;
@@ -53,6 +66,13 @@ interface ConnectionsState {
     sockets: Record<string, SocketState | undefined>;
     sessions: Record<string, SshSessionState | undefined>;
     tunnels: Record<string, TunnelRuntimeState | undefined>;
+    mqtt: Record<string, MqttState | undefined>;
+
+    setMqttStatus: (id: string, status: MqttStatus, patch?: Partial<MqttState>) => void;
+    patchMqtt: (id: string, patch: Partial<MqttState>) => void;
+    addMqttMessage: (id: string, message: MqttMessage, limit: number) => void;
+    clearMqttMessages: (id: string) => void;
+    forgetMqtt: (id: string) => void;
 
     setSocketStatus: (id: string, status: WebSocketStatus, patch?: Partial<SocketState>) => void;
     addSocketMessage: (id: string, message: WebSocketMessage, limit: number) => void;
@@ -78,6 +98,15 @@ export const emptySocket = (): SocketState => ({
     reconnectAttempts: 0,
 });
 
+/** The state of an MQTT connection that has never been opened. */
+export const emptyMqtt = (): MqttState => ({
+    status: 'disconnected',
+    connectedAt: null,
+    messages: [],
+    error: null,
+    subscriptions: {},
+});
+
 const without = <T>(record: Record<string, T>, id: string) => {
     const next = { ...record };
     delete next[id];
@@ -91,6 +120,62 @@ export const useConnectionsStore = create<ConnectionsState>((set) => ({
     sockets: {},
     sessions: {},
     tunnels: {},
+    mqtt: {},
+
+    setMqttStatus: (id, status, patch) =>
+        set((state) => {
+            const current = state.mqtt[id] ?? emptyMqtt();
+            return {
+                mqtt: {
+                    ...state.mqtt,
+                    [id]: {
+                        ...current,
+                        ...patch,
+                        status,
+                        ...(status === 'connected'
+                            ? { connectedAt: new Date().toISOString(), error: null }
+                            : {}),
+                        // Subscriptions belong to the connection that made them.
+                        ...(status === 'disconnected' || status === 'error'
+                            ? { subscriptions: {}, connectedAt: null }
+                            : {}),
+                    },
+                },
+            };
+        }),
+
+    patchMqtt: (id, patch) =>
+        set((state) => ({
+            mqtt: { ...state.mqtt, [id]: { ...(state.mqtt[id] ?? emptyMqtt()), ...patch } },
+        })),
+
+    addMqttMessage: (id, message, limit) =>
+        set((state) => {
+            const current = state.mqtt[id] ?? emptyMqtt();
+            const messages = [...current.messages, message];
+            return {
+                mqtt: {
+                    ...state.mqtt,
+                    [id]: {
+                        ...current,
+                        messages:
+                            messages.length > limit
+                                ? messages.slice(messages.length - limit)
+                                : messages,
+                    },
+                },
+            };
+        }),
+
+    clearMqttMessages: (id) =>
+        set((state) => {
+            const current = state.mqtt[id];
+            return current
+                ? { mqtt: { ...state.mqtt, [id]: { ...current, messages: [] } } }
+                : state;
+        }),
+
+    forgetMqtt: (id) => set((state) => ({ mqtt: without(state.mqtt, id) })),
 
     setSocketStatus: (id, status, patch) =>
         set((state) => {
@@ -168,10 +253,13 @@ export const useConnectionsStore = create<ConnectionsState>((set) => ({
 
 /** Clears every live-connection record. Call only after the resources themselves are released. */
 export const resetConnections = () =>
-    useConnectionsStore.setState({ sockets: {}, sessions: {}, tunnels: {} });
+    useConnectionsStore.setState({ sockets: {}, sessions: {}, tunnels: {}, mqtt: {} });
 
 /** What the status bar shows and what a workspace switch has to warn about. */
 export const activeConnectionCounts = (state: ConnectionsState) => ({
+    mqtt: Object.values(state.mqtt).filter(
+        (item) => item?.status === 'connected' || item?.status === 'connecting',
+    ).length,
     webSockets: Object.values(state.sockets).filter(
         (socket) => socket?.status === 'connected' || socket?.status === 'connecting',
     ).length,
@@ -184,6 +272,20 @@ export const activeConnectionCounts = (state: ConnectionsState) => ({
 const textEncoder = typeof TextEncoder === 'undefined' ? null : new TextEncoder();
 
 export const byteLength = (text: string) => textEncoder?.encode(text).byteLength ?? text.length;
+
+/** A log line written by the app itself for an MQTT connection (connected, subscribed, error). */
+export const mqttSystemMessage = (text: string, error = false): MqttMessage => ({
+    id: createId(),
+    direction: 'system',
+    topic: '',
+    payload: text,
+    encoding: 'text',
+    sizeBytes: 0,
+    qos: 0,
+    retain: false,
+    timestamp: new Date().toISOString(),
+    ...(error ? { error: true } : {}),
+});
 
 /** A log line written by the app itself (connected, closed, error), as opposed to a frame from the
  * server.

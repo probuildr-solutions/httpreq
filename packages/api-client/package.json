@@ -12,6 +12,7 @@
     },
     "dependencies": {
         "@httpreq/shared": "*",
-        "@httpreq/workspace": "*"
+        "@httpreq/workspace": "*",
+        "protobufjs": "^7.5.4"
     }
 }

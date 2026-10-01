@@ -19,6 +19,7 @@ import { confirmAction } from '../confirm';
 import { editExisting, editNew, type EditTarget } from '../editTarget';
 import { useConnectionsStore } from '../connections';
 import { tunnelsUsingSshProfile, useWorkbenchStore } from '../store';
+import { isSshBusy, sshProfileConnection, type SshConnectionPhase } from './connectionState';
 import { SshProfileDialog } from './SshProfileDialog';
 import { useSsh } from './useSsh';
 import {
@@ -41,6 +42,16 @@ import {
 import { useSelection } from '../explorer/useSelection';
 import { ActionIcon, Button, Menu, Text, Tooltip } from '../kit';
 
+const CONTROLS: Record<
+    SshConnectionPhase,
+    { label: string; preposition: string; color: 'teal' | 'red'; busy: boolean }
+> = {
+    disconnected: { label: 'Connect', preposition: 'to', color: 'teal', busy: false },
+    connecting: { label: 'Connecting', preposition: 'to', color: 'teal', busy: true },
+    connected: { label: 'Disconnect', preposition: 'from', color: 'red', busy: false },
+    disconnecting: { label: 'Disconnecting', preposition: 'from', color: 'red', busy: true },
+};
+
 /** The SSH sidebar view: the workspace's connection profiles and their live sessions. */
 export function SshPanel({ onOpened }: { onOpened?: () => void }) {
     const profiles = useWorkbenchStore((state) => state.workspace.sshProfiles);
@@ -58,22 +69,17 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
             (session) => session?.profileId === profileId && session.status === 'connected',
         ).length;
 
-    /** Sessions of a profile that are up or on their way up: what "Disconnect" would end. */
-    const activeSessionIds = (profileId: string) =>
-        Object.values(sessions).flatMap((session) =>
-            session?.profileId === profileId &&
-            (session.status === 'connected' || session.status === 'connecting')
-                ? [session.sessionId]
-                : [],
-        );
-
     const connect = (profile: SshProfile) => {
+        // A connection or disconnection in flight owns the profile until its lifecycle ends.
+        if (isSshBusy(sshProfileConnection(sessions, profile.id).phase)) return;
         void ssh.open(profile);
         onOpened?.();
     };
 
     const disconnect = (profile: SshProfile) => {
-        for (const sessionId of activeSessionIds(profile.id)) void ssh.disconnect(sessionId);
+        const { phase, activeSessionIds } = sshProfileConnection(sessions, profile.id);
+        if (isSshBusy(phase)) return;
+        for (const sessionId of activeSessionIds) void ssh.disconnect(sessionId);
     };
 
     const remove = async (profile: SshProfile) => {
@@ -169,7 +175,8 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
                 ) : (
                     profiles.map((profile) => {
                         const live = liveCount(profile.id);
-                        const active = activeSessionIds(profile.id).length > 0;
+                        const { phase, error } = sshProfileConnection(sessions, profile.id);
+                        const control = CONTROLS[phase];
                         const checked = selection.isSelected(profile.id);
                         return (
                             <div
@@ -206,26 +213,35 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
                                         {profile.username || 'user'}@{profile.host || 'host'}:
                                         {profile.port}
                                     </span>
+                                    {error && (
+                                        <span
+                                            role="alert"
+                                            className="block truncate text-[11px] text-red-6"
+                                            title={error.detail || error.message}
+                                        >
+                                            {error.message}
+                                        </span>
+                                    )}
                                 </button>
                                 <span className={ITEM_ACTIONS} hidden={selection.selecting}>
-                                    {/* Follows the live session state: connect when idle, disconnect when up. */}
-                                    <Tooltip label={active ? 'Disconnect' : 'Connect'}>
+                                    {/* Driven by the session lifecycle: Play, spinner, Stop, spinner. */}
+                                    <Tooltip label={control.label}>
                                         <ActionIcon
                                             variant="light"
-                                            color={active ? 'red' : 'teal'}
+                                            color={control.color}
                                             size="sm"
-                                            data-state={active ? 'active' : 'idle'}
-                                            aria-label={
-                                                active
-                                                    ? `Disconnect from ${profile.name}`
-                                                    : `Connect to ${profile.name}`
-                                            }
+                                            data-state={phase}
+                                            loading={control.busy}
+                                            aria-busy={control.busy || undefined}
+                                            aria-label={`${control.label} ${control.preposition} ${profile.name}`}
                                             onClick={() =>
-                                                active ? disconnect(profile) : connect(profile)
+                                                phase === 'connected'
+                                                    ? disconnect(profile)
+                                                    : connect(profile)
                                             }
                                             className="transition-colors"
                                         >
-                                            {active ? (
+                                            {phase === 'connected' ? (
                                                 <IconPlayerStop size={13} />
                                             ) : (
                                                 <IconPlayerPlay size={13} />

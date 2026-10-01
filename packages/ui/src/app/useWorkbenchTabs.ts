@@ -40,7 +40,14 @@ export function useWorkbenchTabs() {
             const saved = http.get(id);
             if (saved) {
                 return [
-                    { id, kind: 'request', name: saved.name, method: saved.method, url: saved.url },
+                    {
+                        id,
+                        kind: 'request',
+                        name: saved.name,
+                        method: saved.method,
+                        ...(saved.protocol ? { protocol: saved.protocol } : {}),
+                        url: saved.url,
+                    },
                 ];
             }
             const socket = sockets.get(id);

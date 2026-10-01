@@ -224,7 +224,15 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
      */
     const disconnect = useCallback(
         async (sessionId: string) => {
-            await bridge?.disconnect(sessionId);
+            const connections = useConnectionsStore.getState();
+            // One disconnection at a time: a second request while it runs would race the first.
+            if (connections.sessions[sessionId]?.status === 'disconnecting') return;
+            connections.patchSession(sessionId, { status: 'disconnecting' });
+            try {
+                await bridge?.disconnect(sessionId);
+            } catch {
+                // The session is gone either way; the state below reflects that.
+            }
             pendingOutput.current.delete(sessionId);
             useConnectionsStore
                 .getState()
@@ -281,7 +289,8 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
                 // The profile may have been edited since the tab opened; reconnect with the latest.
                 sessionProfiles.current.set(existing, profile);
                 const status = sessions[existing]?.status;
-                if (status !== 'connected' && status !== 'connecting') await reconnect(existing);
+                if (status !== 'connected' && status !== 'connecting' && status !== 'disconnecting')
+                    await reconnect(existing);
                 return existing;
             }
 

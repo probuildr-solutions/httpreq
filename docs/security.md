@@ -64,3 +64,11 @@ npm run build
 npm run package:desktop
 node apps/desktop/scripts/verify-packages.mjs win   # or mac / linux
 ```
+
+## Protocols, scripts and code generation
+
+- **Scripts** run in a WebAssembly interpreter with no host functions, a heap/stack/time budget and fresh state per run; the engine's output is treated as untrusted data and validated. The CSP gains `'wasm-unsafe-eval'` only.
+- **IPC**: `grpc:*` and `mqtt:*` handlers check the sender, then re-parse every payload (`parsePreparedGrpcCall`, `parsePreparedMqtt`, `parseMqttPublish`, …). Unknown fields are dropped, so a renderer cannot add channel or client options. gRPC targets must be `host:port`, metadata keys are lower-case ASCII and may not use the reserved `grpc-` prefix, `.proto` text is parsed in memory and never read from disk, connections and calls are keyed by the owning window and closed with it.
+- **TLS** is verified by default everywhere; turning verification off is an explicit per-request setting, and the main process only honours an explicit `false`. MQTT CA and client certificates must look like PEM, and the client key is never written to storage, exports or generated code.
+- **Imported definitions** (WSDL, `.proto`) are bounded in size and count, XML with a DOCTYPE or entity declaration is refused, and WSDLs are fetched only on request, over http(s), without credentials or cookies.
+- **Secrets**: MQTT credentials use the authorization providers (so they follow the same persistence rules); MQTT errors and logs pass through the redactor; generated code uses a placeholder for credentials unless the user explicitly includes them. SOAP actions and script-set headers are rejected if they contain line breaks.

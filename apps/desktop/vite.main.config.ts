@@ -18,7 +18,15 @@ export default defineConfig({
             // ssh2 and ws load optional native bindings through runtime requires, so they are kept
             // as real dependencies and resolved from node_modules instead of being bundled; so is
             // electron-updater, which reads its feed settings from the app's resources at runtime.
-            external: ['electron', 'electron-updater', 'ssh2', 'ws'],
+            external: [
+                'electron',
+                'electron-updater',
+                'ssh2',
+                'ws',
+                '@grpc/grpc-js',
+                'mqtt',
+                'protobufjs',
+            ],
             output: { format: 'es', entryFileNames: 'main.js' },
         },
     },

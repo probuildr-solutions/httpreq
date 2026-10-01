@@ -8,6 +8,10 @@
  * display data only, so renaming or moving never breaks tabs, history or inheritance.
  */
 
+import type { GrpcConfig } from './grpc';
+import type { MqttConfig } from './mqtt';
+import type { ProtocolId } from './protocols';
+import type { SoapConfig } from './soap';
 import type { WebSocketRequest } from './websocket';
 import type { SshProfile, TunnelProfile } from './ssh';
 
@@ -176,6 +180,14 @@ export interface HttpRequest {
     name: string;
     /** Owning collection or folder; `null` for drafts that are not in a collection. */
     parentId: string | null;
+    /**
+     * Transport protocol. Absent means plain HTTP, so requests saved before protocols existed are
+     * unchanged. The matching configuration below is present exactly for the other protocols.
+     */
+    protocol?: ProtocolId;
+    soap?: SoapConfig;
+    grpc?: GrpcConfig;
+    mqtt?: MqttConfig;
     method: HttpMethod;
     url: string;
     /** Mirrors the URL's query string plus disabled parameters that are not in the URL. */

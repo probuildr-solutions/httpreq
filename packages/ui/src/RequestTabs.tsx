@@ -24,9 +24,9 @@ import {
     type KeyboardEvent,
     type ReactNode,
 } from 'react';
-import type { HttpMethod } from '@httpreq/shared';
+import type { HttpMethod, ProtocolId } from '@httpreq/shared';
 import { endTreeDrag, startTreeDrag, TREE_DRAG_TYPE } from './explorer/treeDrag';
-import { methodText, REQUEST_PANEL_ID, requestTabId, WEBSOCKET_TEXT } from './methods';
+import { REQUEST_PANEL_ID, requestBadge, requestTabId, WEBSOCKET_TEXT } from './methods';
 import { ActionIcon, Menu, Tooltip, VisuallyHidden, cx } from './kit';
 
 /** What a tab can hold: an HTTP request, a WebSocket request, an environment or an SSH terminal. */
@@ -50,6 +50,7 @@ export interface TabItem {
     name: string;
     /** HTTP tabs only. */
     method?: HttpMethod;
+    protocol?: ProtocolId;
     url?: string;
     /** Live state for WebSocket and SSH tabs, shown as an icon and a label after the name. */
     status?: TabConnectionStatus;
@@ -494,7 +495,7 @@ function TabBadge({ item }: { item: TabItem }) {
             ? { label: 'WS', color: WEBSOCKET_TEXT }
             : item.kind === 'ssh'
               ? { label: 'SSH', color: 'text-cyan-5' }
-              : { label: item.method ?? 'GET', color: methodText[item.method ?? 'GET'] };
+              : requestBadge(item.method, item.protocol);
     return <span className={cx(TAB_BADGE, color)}>{label}</span>;
 }
 

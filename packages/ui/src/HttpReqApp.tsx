@@ -7,14 +7,17 @@ import {
     BrowserWebSocketRuntime,
     buildRequest,
     createVariableResolver,
+    ElectronMqttRuntime,
     ElectronWebSocketRuntime,
     getAuthProvider,
     requestOAuthTokens,
     toCurl,
+    UnavailableMqttRuntime,
 } from '@httpreq/api-client';
 import {
     detectCapabilities,
     DOCUMENTATION_URL,
+    protocolOf,
     type BuildInfo,
     type DesktopBridge,
     type HistoryRepository,
@@ -63,12 +66,14 @@ import { HostKeyDialog } from './ssh/HostKeyDialog';
 import { SshTerminal } from './ssh/SshTerminal';
 import { SshContext, useSshManager } from './ssh/useSsh';
 import { StatusBar } from './StatusBar';
-import { activeEnvironment, requestKind, useWorkbenchStore } from './store';
+import { activeEnvironment, editableRequest, requestKind, useWorkbenchStore } from './store';
 import { TitleBar } from './TitleBar';
 import { TunnelContext, useTunnelManager } from './tunnels/useTunnels';
 import { usePersistence } from './usePersistence';
 import { useRequestExecution } from './useRequestExecution';
 import { VariableContext, type VariableScope } from './variableContext';
+import { MqttContext, useMqttManager } from './mqtt/useMqtt';
+import { ProtocolServicesContext, createProtocolServices } from './protocols/services';
 import { WebSocketContext, useWebSocketManager } from './websocket/useWebSockets';
 import { WebSocketEditor } from './websocket/WebSocketEditor';
 import { WorkbenchSplit } from './WorkbenchSplit';
@@ -116,7 +121,16 @@ function ActiveResponse({
 }) {
     const response = useWorkbenchStore((state) => state.responses[requestId]);
     const stream = useWorkbenchStore((state) => state.streams[requestId]);
-    return <ResponsePanel response={response} stream={stream} loading={loading} onStop={onStop} />;
+    const report = useWorkbenchStore((state) => state.scriptReports[requestId]);
+    return (
+        <ResponsePanel
+            response={response}
+            stream={stream}
+            loading={loading}
+            onStop={onStop}
+            report={report}
+        />
+    );
 }
 
 export function HttpReqApp({
@@ -148,6 +162,12 @@ export function HttpReqApp({
         [bridge],
     );
     const sockets = useWebSocketManager(webSocketRuntime, pipelineContext);
+    const mqttRuntime = useMemo(
+        () => (bridge?.mqtt ? new ElectronMqttRuntime() : new UnavailableMqttRuntime()),
+        [bridge],
+    );
+    const mqtt = useMqttManager(mqttRuntime, pipelineContext);
+    const protocolServices = useMemo(() => createProtocolServices(runtime), [runtime]);
     const ssh = useSshManager(capabilities.ssh ? bridge?.ssh : undefined);
     const tunnels = useTunnelManager(capabilities.tunneling ? bridge?.tunnels : undefined);
 
@@ -159,6 +179,12 @@ export function HttpReqApp({
     const environments = useWorkbenchStore((state) => state.workspace.environments);
     const activeEnvironmentId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
     const activeId = useWorkbenchStore((state) => state.activeRequestId);
+    const activeProtocol = useWorkbenchStore((state) => {
+        const request = state.activeRequestId
+            ? editableRequest(state, state.activeRequestId)
+            : undefined;
+        return request ? protocolOf(request) : 'http';
+    });
     const setActiveRequest = useWorkbenchStore((state) => state.setActiveRequest);
     const cycleRequest = useWorkbenchStore((state) => state.cycleRequest);
     const moveTab = useWorkbenchStore((state) => state.moveTab);
@@ -291,6 +317,7 @@ export function HttpReqApp({
             if (!savedId) return;
             // A copy took over the original's tab; a socket must not stay connected behind it.
             if (savedId !== id && kind === 'websocket') sockets.forget(id);
+            if (savedId !== id && kind === 'request') mqtt.forget(id);
             if (await saveRequest(savedId)) {
                 const saved = useWorkbenchStore.getState();
                 const path = getAncestors(saved.workspace, savedId)
@@ -299,7 +326,7 @@ export function HttpReqApp({
                 notifications.show({ color: 'teal', message: `Saved to ${path}.` });
             } else reportSaveFailure();
         },
-        [saveRequest, sockets, reportSaveFailure],
+        [saveRequest, sockets, mqtt, reportSaveFailure],
     );
 
     /** Activating any tab: at most one of a terminal, an environment or a request is active. */
@@ -350,13 +377,15 @@ export function HttpReqApp({
             // the next time the same request is opened.
             for (const id of requestIds) {
                 if (requestKind(state.workspace, id) === 'websocket') sockets.forget(id);
+                // A closed MQTT tab disconnects from its broker; other requests have nothing to forget.
+                mqtt.forget(id);
             }
             if (requestIds.length) {
                 await closeRequestTabs(requestIds, { saveRequest, cancelRequest });
             }
             for (const id of sshIds) await ssh.close(id);
         },
-        [cancelRequest, saveRequest, sockets, ssh],
+        [cancelRequest, saveRequest, sockets, mqtt, ssh],
     );
 
     const closeTab = useCallback((id: string) => closeTabs([id]), [closeTabs]);
@@ -375,10 +404,11 @@ export function HttpReqApp({
     /** Releases every live resource this workspace owns, before it is replaced or the app exits. */
     const releaseConnections = useCallback(async () => {
         sockets.closeAll();
+        mqtt.closeAll();
         await ssh.closeAll();
         await tunnels.stopAll();
         resetConnections();
-    }, [sockets, ssh, tunnels]);
+    }, [sockets, mqtt, ssh, tunnels]);
 
     const newRequest = useCallback(() => {
         setActiveSshSession(null);
@@ -512,224 +542,248 @@ export function HttpReqApp({
     if (!loaded) return null;
     const sending = activeId ? execution.isSending(activeId) : false;
 
+    const requestEditor = activeId ? (
+        <RequestEditor
+            key={activeId}
+            requestId={activeId}
+            desktop={!!desktop}
+            sending={sending}
+            onSend={() => void send()}
+            onCancel={() => execution.cancel(activeId)}
+            onSave={() => void saveActive()}
+            onSaveAs={saveActiveAs}
+            urlRef={urlRef}
+            buildCurl={buildCurl}
+            shortcuts={{
+                send: shortcutLabel('request.send'),
+                save: shortcutLabel('request.save'),
+                saveAs: shortcutLabel('request.save-as'),
+                focusUrl: shortcutLabel('request.focus-url'),
+            }}
+        />
+    ) : null;
+
     return (
         <CapabilitiesContext.Provider value={capabilities}>
             <VariableContext.Provider value={variableScope}>
                 <AuthServicesContext.Provider value={authServices}>
-                    <WebSocketContext.Provider value={sockets}>
-                        <SshContext.Provider value={ssh}>
-                            <TunnelContext.Provider value={tunnels}>
-                                <AppShell
-                                    headerHeight={TITLE_BAR_HEIGHT + SECONDARY_BAR_HEIGHT}
-                                    navbarWidth={sidebarWidth}
-                                    navbarVisible={sidebarVisible}
-                                    navbarOpen={opened}
-                                    footerHeight={STATUS_BAR_HEIGHT}
-                                    header={
-                                        <>
-                                            <div style={{ height: TITLE_BAR_HEIGHT }}>
-                                                <TitleBar
-                                                    // The workspace menu lives in the row below, so the title bar's own text
-                                                    // is just whatever tab is open.
-                                                    title={activeName ?? ''}
-                                                    menus={APP_MENUS}
-                                                    commands={commands}
-                                                    mac={mac}
-                                                    desktop={desktop}
-                                                    mobileNavOpened={opened}
-                                                    onToggleMobileNav={toggle}
+                    <ProtocolServicesContext.Provider value={protocolServices}>
+                        <MqttContext.Provider value={mqtt}>
+                            <WebSocketContext.Provider value={sockets}>
+                                <SshContext.Provider value={ssh}>
+                                    <TunnelContext.Provider value={tunnels}>
+                                        <AppShell
+                                            headerHeight={TITLE_BAR_HEIGHT + SECONDARY_BAR_HEIGHT}
+                                            navbarWidth={sidebarWidth}
+                                            navbarVisible={sidebarVisible}
+                                            navbarOpen={opened}
+                                            footerHeight={STATUS_BAR_HEIGHT}
+                                            header={
+                                                <>
+                                                    <div style={{ height: TITLE_BAR_HEIGHT }}>
+                                                        <TitleBar
+                                                            // The workspace menu lives in the row below, so the title bar's own text
+                                                            // is just whatever tab is open.
+                                                            title={activeName ?? ''}
+                                                            menus={APP_MENUS}
+                                                            commands={commands}
+                                                            mac={mac}
+                                                            desktop={desktop}
+                                                            mobileNavOpened={opened}
+                                                            onToggleMobileNav={toggle}
+                                                        />
+                                                    </div>
+                                                    <div style={{ height: SECONDARY_BAR_HEIGHT }}>
+                                                        <SecondaryBar
+                                                            toggleSidebar={
+                                                                commands['view.toggle-sidebar']
+                                                            }
+                                                            sidebarVisible={sidebarVisible}
+                                                        >
+                                                            <WorkspaceSwitcher
+                                                                actions={workspaceActions}
+                                                                releaseConnections={
+                                                                    releaseConnections
+                                                                }
+                                                            />
+                                                        </SecondaryBar>
+                                                    </div>
+                                                </>
+                                            }
+                                            navbar={
+                                                <Sidebar
+                                                    onClearHistory={clearHistory}
+                                                    onRemoveHistory={removeHistory}
+                                                    onNavigate={closeNav}
                                                 />
-                                            </div>
-                                            <div style={{ height: SECONDARY_BAR_HEIGHT }}>
-                                                <SecondaryBar
-                                                    toggleSidebar={commands['view.toggle-sidebar']}
-                                                    sidebarVisible={sidebarVisible}
-                                                >
-                                                    <WorkspaceSwitcher
-                                                        actions={workspaceActions}
-                                                        releaseConnections={releaseConnections}
+                                            }
+                                            footer={
+                                                statusBarVisible ? (
+                                                    <StatusBar
+                                                        workspaceName={workspaceName}
+                                                        runtimeLabel={
+                                                            desktop ? 'Desktop' : 'Browser'
+                                                        }
+                                                        version={version}
+                                                        sending={sending}
+                                                        onResetZoom={resetZoom}
+                                                        zoomed={zoomed}
+                                                        onApplyUpdate={applyUpdate}
                                                     />
-                                                </SecondaryBar>
-                                            </div>
-                                        </>
-                                    }
-                                    navbar={
-                                        <Sidebar
-                                            onClearHistory={clearHistory}
-                                            onRemoveHistory={removeHistory}
-                                            onNavigate={closeNav}
-                                        />
-                                    }
-                                    footer={
-                                        statusBarVisible ? (
-                                            <StatusBar
-                                                workspaceName={workspaceName}
-                                                runtimeLabel={desktop ? 'Desktop' : 'Browser'}
-                                                version={version}
-                                                sending={sending}
-                                                onResetZoom={resetZoom}
-                                                zoomed={zoomed}
-                                                onApplyUpdate={applyUpdate}
+                                                ) : undefined
+                                            }
+                                        >
+                                            <WorkbenchTabs
+                                                tabs={tabs}
+                                                activeId={activeTabId}
+                                                onActivate={activateTab}
+                                                onClose={onCloseTab}
+                                                onCloseMany={onCloseTabs}
+                                                onNew={newRequest}
+                                                onMove={moveTabAnyKind}
+                                                newShortcut={shortcutLabel('request.new')}
+                                                closeShortcut={shortcutLabel('request.close')}
+                                                actions={tabActions}
                                             />
-                                        ) : undefined
-                                    }
-                                >
-                                    <WorkbenchTabs
-                                        tabs={tabs}
-                                        activeId={activeTabId}
-                                        onActivate={activateTab}
-                                        onClose={onCloseTab}
-                                        onCloseMany={onCloseTabs}
-                                        onNew={newRequest}
-                                        onMove={moveTabAnyKind}
-                                        newShortcut={shortcutLabel('request.new')}
-                                        closeShortcut={shortcutLabel('request.close')}
-                                        actions={tabActions}
-                                    />
 
-                                    {/*
-                                     * Every open terminal stays mounted and is merely hidden when its tab is not
-                                     * the active one. A terminal is a live screen, not a view of stored data:
-                                     * unmounting it would dispose the xterm instance and destroy the scrollback,
-                                     * the prompt and whatever full-screen program is running, so coming back to a
-                                     * still-connected session would show an empty pane.
-                                     */}
-                                    {sshTabs.map((tab) => {
-                                        const active = tab.id === activeSshId;
-                                        return (
-                                            <div
-                                                key={tab.id}
-                                                role="tabpanel"
-                                                id={active ? REQUEST_PANEL_ID : undefined}
-                                                aria-labelledby={requestTabId(tab.id)}
-                                                className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
-                                                hidden={!active}
-                                            >
-                                                <SshTerminal sessionId={tab.id} />
-                                            </div>
-                                        );
-                                    })}
+                                            {/*
+                                             * Every open terminal stays mounted and is merely hidden when its tab is not
+                                             * the active one. A terminal is a live screen, not a view of stored data:
+                                             * unmounting it would dispose the xterm instance and destroy the scrollback,
+                                             * the prompt and whatever full-screen program is running, so coming back to a
+                                             * still-connected session would show an empty pane.
+                                             */}
+                                            {sshTabs.map((tab) => {
+                                                const active = tab.id === activeSshId;
+                                                return (
+                                                    <div
+                                                        key={tab.id}
+                                                        role="tabpanel"
+                                                        id={active ? REQUEST_PANEL_ID : undefined}
+                                                        aria-labelledby={requestTabId(tab.id)}
+                                                        className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
+                                                        hidden={!active}
+                                                    >
+                                                        <SshTerminal sessionId={tab.id} />
+                                                    </div>
+                                                );
+                                            })}
 
-                                    {activeSshId &&
-                                    sshTabs.some(
-                                        (tab) => tab.id === activeSshId,
-                                    ) ? null : activeKind === 'environment' &&
-                                      activeEnvironmentTabId ? (
-                                        <div
-                                            role="tabpanel"
-                                            id={REQUEST_PANEL_ID}
-                                            aria-labelledby={requestTabId(activeEnvironmentTabId)}
-                                            className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
-                                        >
-                                            <EnvironmentEditor
-                                                key={activeEnvironmentTabId}
-                                                environmentId={activeEnvironmentTabId}
-                                            />
-                                        </div>
-                                    ) : activeKind === 'websocket' && activeId ? (
-                                        <div
-                                            role="tabpanel"
-                                            id={REQUEST_PANEL_ID}
-                                            aria-labelledby={requestTabId(activeId)}
-                                            className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
-                                        >
-                                            <WebSocketEditor
-                                                key={activeId}
-                                                requestId={activeId}
-                                                onSave={() => void saveActive()}
-                                                onSaveAs={saveActiveAs}
-                                                shortcuts={{
-                                                    save: shortcutLabel('request.save'),
-                                                    saveAs: shortcutLabel('request.save-as'),
-                                                }}
-                                            />
-                                        </div>
-                                    ) : activeId && tabs.some((tab) => tab.id === activeId) ? (
-                                        <div
-                                            role="tabpanel"
-                                            id={REQUEST_PANEL_ID}
-                                            aria-labelledby={requestTabId(activeId)}
-                                            className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
-                                        >
-                                            <WorkbenchSplit
-                                                ref={responseRef}
-                                                requestId="request-editor"
-                                                labels={{
-                                                    request: 'Request',
-                                                    response: 'Response',
-                                                }}
-                                                splitterLabel="Resize request and response panels"
-                                                busy={sending}
-                                                request={
-                                                    <RequestEditor
+                                            {activeSshId &&
+                                            sshTabs.some(
+                                                (tab) => tab.id === activeSshId,
+                                            ) ? null : activeKind === 'environment' &&
+                                              activeEnvironmentTabId ? (
+                                                <div
+                                                    role="tabpanel"
+                                                    id={REQUEST_PANEL_ID}
+                                                    aria-labelledby={requestTabId(
+                                                        activeEnvironmentTabId,
+                                                    )}
+                                                    className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
+                                                >
+                                                    <EnvironmentEditor
+                                                        key={activeEnvironmentTabId}
+                                                        environmentId={activeEnvironmentTabId}
+                                                    />
+                                                </div>
+                                            ) : activeKind === 'websocket' && activeId ? (
+                                                <div
+                                                    role="tabpanel"
+                                                    id={REQUEST_PANEL_ID}
+                                                    aria-labelledby={requestTabId(activeId)}
+                                                    className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
+                                                >
+                                                    <WebSocketEditor
                                                         key={activeId}
                                                         requestId={activeId}
-                                                        desktop={!!desktop}
-                                                        sending={sending}
-                                                        onSend={() => void send()}
-                                                        onCancel={() => execution.cancel(activeId)}
                                                         onSave={() => void saveActive()}
                                                         onSaveAs={saveActiveAs}
-                                                        urlRef={urlRef}
-                                                        buildCurl={buildCurl}
                                                         shortcuts={{
-                                                            send: shortcutLabel('request.send'),
                                                             save: shortcutLabel('request.save'),
                                                             saveAs: shortcutLabel(
                                                                 'request.save-as',
                                                             ),
-                                                            focusUrl:
-                                                                shortcutLabel('request.focus-url'),
                                                         }}
                                                     />
-                                                }
-                                                response={
-                                                    <ActiveResponse
-                                                        requestId={activeId}
-                                                        loading={sending}
-                                                        onStop={() => execution.cancel(activeId)}
-                                                    />
-                                                }
-                                            />
-                                        </div>
-                                    ) : (
-                                        <EmptyWorkspace
-                                            onNewRequest={newRequest}
-                                            onNewWebSocket={newWebSocket}
-                                            onNewCollection={() => createCollection()}
-                                        />
-                                    )}
-                                </AppShell>
+                                                </div>
+                                            ) : activeId &&
+                                              tabs.some((tab) => tab.id === activeId) ? (
+                                                <div
+                                                    role="tabpanel"
+                                                    id={REQUEST_PANEL_ID}
+                                                    aria-labelledby={requestTabId(activeId)}
+                                                    className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
+                                                >
+                                                    {activeProtocol === 'mqtt' ? (
+                                                        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                                                            {requestEditor}
+                                                        </div>
+                                                    ) : (
+                                                        <WorkbenchSplit
+                                                            ref={responseRef}
+                                                            requestId="request-editor"
+                                                            labels={{
+                                                                request: 'Request',
+                                                                response: 'Response',
+                                                            }}
+                                                            splitterLabel="Resize request and response panels"
+                                                            busy={sending}
+                                                            request={requestEditor}
+                                                            response={
+                                                                <ActiveResponse
+                                                                    requestId={activeId}
+                                                                    loading={sending}
+                                                                    onStop={() =>
+                                                                        execution.cancel(activeId)
+                                                                    }
+                                                                />
+                                                            }
+                                                        />
+                                                    )}
+                                                </div>
+                                            ) : (
+                                                <EmptyWorkspace
+                                                    onNewRequest={newRequest}
+                                                    onNewWebSocket={newWebSocket}
+                                                    onNewCollection={() => createCollection()}
+                                                />
+                                            )}
+                                        </AppShell>
 
-                                <SettingsDialog
-                                    opened={dialog === 'settings'}
-                                    onClose={() => setDialog(null)}
-                                />
-                                <ShortcutsDialog
-                                    opened={dialog === 'shortcuts'}
-                                    onClose={() => setDialog(null)}
-                                    commands={commands}
-                                    mac={mac}
-                                    web={!desktop}
-                                />
-                                <AboutDialog
-                                    opened={dialog === 'about'}
-                                    onClose={() => setDialog(null)}
-                                    version={version}
-                                    build={build}
-                                    desktop={desktop}
-                                    onOpenDocumentation={openDocumentation}
-                                    onCheckForUpdates={updateCheck ? checkUpdatesNow : undefined}
-                                    onApplyUpdate={applyUpdate}
-                                />
-                                <ImportDialog />
-                                <ExportDialog />
-                                <SaveAsDialog onSaveAs={saveAs} />
-                                <ConfirmDialog />
-                                <HostKeyDialog />
-                            </TunnelContext.Provider>
-                        </SshContext.Provider>
-                    </WebSocketContext.Provider>
+                                        <SettingsDialog
+                                            opened={dialog === 'settings'}
+                                            onClose={() => setDialog(null)}
+                                        />
+                                        <ShortcutsDialog
+                                            opened={dialog === 'shortcuts'}
+                                            onClose={() => setDialog(null)}
+                                            commands={commands}
+                                            mac={mac}
+                                            web={!desktop}
+                                        />
+                                        <AboutDialog
+                                            opened={dialog === 'about'}
+                                            onClose={() => setDialog(null)}
+                                            version={version}
+                                            build={build}
+                                            desktop={desktop}
+                                            onOpenDocumentation={openDocumentation}
+                                            onCheckForUpdates={
+                                                updateCheck ? checkUpdatesNow : undefined
+                                            }
+                                            onApplyUpdate={applyUpdate}
+                                        />
+                                        <ImportDialog />
+                                        <ExportDialog />
+                                        <SaveAsDialog onSaveAs={saveAs} />
+                                        <ConfirmDialog />
+                                        <HostKeyDialog />
+                                    </TunnelContext.Provider>
+                                </SshContext.Provider>
+                            </WebSocketContext.Provider>
+                        </MqttContext.Provider>
+                    </ProtocolServicesContext.Provider>
                 </AuthServicesContext.Provider>
             </VariableContext.Provider>
         </CapabilitiesContext.Provider>

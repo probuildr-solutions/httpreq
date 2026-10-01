@@ -1,6 +1,6 @@
 # HttpReq
 
-HttpReq is a local-first developer networking toolkit with one React interface for the web and Electron: an HTTP/REST client, a WebSocket client, and — on the desktop — an SSH terminal and SSH port forwarding, all organised into isolated workspaces.
+HttpReq is a local-first developer networking toolkit with one React interface for the web and Electron: an HTTP/REST client with SOAP, gRPC and MQTT support, a WebSocket client, sandboxed request scripts, code generation, and — on the desktop — an SSH terminal and SSH port forwarding, all organised into isolated workspaces.
 
 ## Platform support
 
@@ -8,6 +8,11 @@ HttpReq is a local-first developer networking toolkit with one React interface f
 | -------------------------------- | --- | ---------------- |
 | Workspaces                       | Yes | Yes              |
 | HTTP / REST                      | Yes | Yes              |
+| SOAP (with WSDL discovery)       | Yes | Yes              |
+| gRPC (unary, server streaming)   | No  | Yes              |
+| MQTT (publish/subscribe, TLS)    | No  | Yes              |
+| Request scripts and tests        | Yes | Yes              |
+| Code generation                  | Yes | Yes              |
 | WebSocket client                 | Yes | Yes              |
 | WebSocket handshake headers      | No  | Yes              |
 | SSH client                       | No  | Yes              |
@@ -23,7 +28,9 @@ apps/
   desktop/         Hardened Electron main process and preload bridge
 packages/
   ui/              Tailwind component kit, workbench, and Zustand state
-  api-client/      HTTP and WebSocket preparation, browser/Electron adapters
+  api-client/      HTTP, WebSocket, SOAP, gRPC and MQTT preparation, browser/Electron adapters
+  scripting/       Sandboxed (QuickJS/WebAssembly) request scripts
+  codegen/         Client code generators (registry of per-language strategies)
   workspace/       Workspace model helpers, migration, and tree operations
   storage/         Key/value store abstraction and the workspace repositories
   shared/          Runtime contracts, domain models, validation, and errors

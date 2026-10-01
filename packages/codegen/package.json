@@ -1,0 +1,17 @@
+{
+    "name": "@httpreq/codegen",
+    "version": "0.4.1",
+    "author": {
+        "name": "Yamatri Reddy",
+        "email": "yamatrireddy94@gmail.com"
+    },
+    "license": "GPL-3.0-only",
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "dependencies": {
+        "@httpreq/api-client": "*",
+        "@httpreq/shared": "*"
+    }
+}

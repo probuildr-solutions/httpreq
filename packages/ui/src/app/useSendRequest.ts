@@ -3,19 +3,31 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 import { useCallback, type RefObject } from 'react';
-import { executeRequest } from '@httpreq/api-client';
+import {
+    ElectronGrpcRuntime,
+    executeProtocolRequest,
+    UnavailableGrpcRuntime,
+} from '@httpreq/api-client';
 import {
     createId,
+    protocolOf,
     type ExecutionHooks,
     type HistoryEntry,
+    type GrpcRuntime,
     type HttpRuntime,
     type SseEvent,
 } from '@httpreq/shared';
 import { reportRequestConnectivity } from '../connectivity';
 import { notifications } from '../kit';
-import { editableRequest, useWorkbenchStore } from '../store';
+import { createScriptSession } from '../scripts/session';
+import { activeEnvironment, editableRequest, useWorkbenchStore } from '../store';
 import type { useRequestExecution } from '../useRequestExecution';
 import { pipelineContext } from './pipelineContext';
+
+const electronGrpc = new ElectronGrpcRuntime();
+const unavailableGrpc = new UnavailableGrpcRuntime();
+/** gRPC runs through the desktop bridge when there is one; a browser says so on use. */
+const grpcRuntime = (): GrpcRuntime => (window.httpreq?.grpc ? electronGrpc : unavailableGrpc);
 
 /** Failures that mean the machine, not the server, could not be reached. */
 const NETWORK_ERRORS = new Set(['NETWORK_ERROR', 'DNS_ERROR', 'CONNECTION_TIMEOUT']);
@@ -40,8 +52,16 @@ export function useSendRequest({ runtime, runExecution, recordHistory, responseR
             const state = useWorkbenchStore.getState();
             const request = editableRequest(state, state.activeRequestId);
             if (!request) return;
+            if (protocolOf(request) === 'mqtt') {
+                notifications.show({
+                    color: 'yellow',
+                    message: 'An MQTT request connects to a broker: use Connect, then Publish.',
+                });
+                return;
+            }
             if (focusResponse) responseRef.current?.focus();
-            const context = pipelineContext();
+            const session = createScriptSession(request, activeEnvironment(state.workspace));
+            const context = { ...pipelineContext(), ...(session ? { scripts: session } : {}) };
             // Events of an open stream are shown as they arrive, batched so a fast stream cannot make
             // the window re-render on every message.
             const queued: SseEvent[] = [];
@@ -58,8 +78,20 @@ export function useSendRequest({ runtime, runExecution, recordHistory, responseR
                 },
             };
             const outcome = await runExecution(request.id, (signal) =>
-                executeRequest(request, context, runtime, signal, hooks),
+                executeProtocolRequest(
+                    request,
+                    context,
+                    { http: runtime, grpc: grpcRuntime() },
+                    signal,
+                    hooks,
+                ),
             );
+            // What the scripts did is kept even when the send failed (a failing script is why).
+            if (session) {
+                const report = session.report();
+                state.setScriptReport(request.id, report);
+                state.applyScriptEnvironment(report.environmentChanges);
+            } else state.setScriptReport(request.id, undefined);
             clearTimeout(flushTimer);
             const entry: HistoryEntry = {
                 id: createId(),
@@ -75,7 +107,7 @@ export function useSendRequest({ runtime, runExecution, recordHistory, responseR
                 timestamp: new Date().toISOString(),
             };
             if (outcome.kind === 'success') {
-                const { response, built } = outcome.value;
+                const { response, warnings } = outcome.value;
                 setResponse(request.id, response);
                 state.endStream(request.id);
                 reportRequestConnectivity('success');
@@ -86,7 +118,7 @@ export function useSendRequest({ runtime, runExecution, recordHistory, responseR
                     durationMs: response.durationMs,
                     sizeBytes: response.sizeBytes,
                 });
-                const notes = [...built.warnings];
+                const notes = [...warnings];
                 if (response.truncated) {
                     notes.push(
                         `The response was cut at ${request.settings.responseSizeLimitMb} MB (Settings › Response size limit).`,

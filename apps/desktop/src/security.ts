@@ -25,7 +25,11 @@ import { isTrustedRendererUrl } from './shell';
 export const buildContentSecurityPolicy = (development: boolean): string =>
     [
         "default-src 'self'",
-        development ? "script-src 'self' 'unsafe-inline' blob:" : "script-src 'self' blob:",
+        // 'wasm-unsafe-eval' lets the script sandbox (QuickJS compiled to WebAssembly) start. It
+        // allows compiling WebAssembly only: JavaScript eval and new Function stay blocked.
+        development
+            ? "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' blob:"
+            : "script-src 'self' 'wasm-unsafe-eval' blob:",
         "worker-src 'self' blob:",
         "style-src 'self' 'unsafe-inline'",
         "font-src 'self' data:",

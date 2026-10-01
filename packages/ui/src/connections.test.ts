@@ -111,6 +111,7 @@ describe('activeConnectionCounts', () => {
         store().setTunnelState(tunnelState('t2', 'error'));
 
         expect(activeConnectionCounts(useConnectionsStore.getState())).toEqual({
+            mqtt: 0,
             webSockets: 2,
             sshSessions: 1,
             tunnels: 1,
@@ -123,6 +124,7 @@ describe('activeConnectionCounts', () => {
         resetConnections();
 
         expect(activeConnectionCounts(useConnectionsStore.getState())).toEqual({
+            mqtt: 0,
             webSockets: 0,
             sshSessions: 0,
             tunnels: 0,
