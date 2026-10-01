@@ -5,6 +5,7 @@
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import {
+    isDesktopUpdateState,
     isMenuCommand,
     isSshStatus,
     type DesktopBridge,
@@ -15,6 +16,7 @@ import {
     type MenuCommand,
     type SshBridge,
     type SshSessionEvent,
+    type UpdatesBridge,
     type TunnelBridge,
     type TunnelRuntimeState,
     type WebSocketBridge,
@@ -106,6 +108,13 @@ const isTunnelState = (value: unknown): value is TunnelRuntimeState =>
     typeof (value as TunnelRuntimeState).tunnelId === 'string' &&
     typeof (value as TunnelRuntimeState).status === 'string';
 
+const updates: UpdatesBridge = {
+    getState: () => ipcRenderer.invoke('updates:state'),
+    check: () => ipcRenderer.invoke('updates:check'),
+    install: () => ipcRenderer.send('updates:install'),
+    onStateChange: (listener) => subscribe('updates:state-changed', listener, isDesktopUpdateState),
+};
+
 const desktop: DesktopBridge = {
     platform: process.platform,
     getAppInfo: () => ipcRenderer.invoke('app:info'),
@@ -114,6 +123,13 @@ const desktop: DesktopBridge = {
     openExternal: (url) => ipcRenderer.send('shell:open-external', url),
     openAuthorizationUrl: (url) => ipcRenderer.send('shell:open-authorization-url', url),
     checkConnectivity: () => ipcRenderer.invoke('net:check'),
+    writeClipboardText: async (text) => {
+        if (!(await ipcRenderer.invoke('clipboard:write-text', text))) {
+            throw new Error('The text could not be written to the clipboard.');
+        }
+    },
+    readClipboardText: () => ipcRenderer.invoke('clipboard:read-text'),
+    updates,
     onWindowStateChange: (listener) => subscribe('window:state-changed', listener, isWindowState),
     onMenuCommand: (listener) => subscribe<MenuCommand>('menu:command', listener, isMenuCommand),
 };

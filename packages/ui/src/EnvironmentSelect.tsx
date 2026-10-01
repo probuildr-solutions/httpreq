@@ -12,6 +12,7 @@ import {
 } from '@tabler/icons-react';
 import { memo } from 'react';
 import { usePreferences } from './preferences';
+import { collectionIdOf } from '@httpreq/workspace';
 import { useWorkbenchStore } from './store';
 import { Menu, PICKER_TRIGGER, TRUNCATE_NAME, UnstyledButton, cx } from './kit';
 
@@ -26,18 +27,20 @@ const check = (checked: boolean) =>
 export const EnvironmentSelect = memo(function EnvironmentSelect() {
     const environments = useWorkbenchStore((state) => state.workspace.environments);
     const activeId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
-    const setActive = useWorkbenchStore((state) => state.setActiveEnvironment);
     const linkEnvironment = useWorkbenchStore((state) => state.linkEnvironment);
-    // What a choice is linked to: the open request, else the selected collection or folder.
-    const linkTarget = useWorkbenchStore((state) => {
+    // The collection the choice is linked to: the one holding the open request or the selection.
+    // Requests outside a collection, and WebSocket requests, have none.
+    const collectionId = useWorkbenchStore((state) => {
         const id = state.activeRequestId ?? state.selectedNodeId;
-        // WebSocket requests cannot be linked to an environment.
         return id && !state.workspace.websocketRequests.some((socket) => socket.id === id)
-            ? id
+            ? collectionIdOf(state.workspace, id)
             : null;
     });
+    const collectionName = useWorkbenchStore(
+        (state) => state.workspace.collections.find((item) => item.id === collectionId)?.name,
+    );
     const choose = (environmentId: string | null) =>
-        linkTarget ? linkEnvironment(linkTarget, environmentId) : setActive(environmentId);
+        collectionId && linkEnvironment(collectionId, environmentId);
     const active = environments.find((environment) => environment.id === activeId);
     const label = active?.name ?? 'No environment';
 
@@ -61,7 +64,7 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
                         PICKER_TRIGGER,
                         'mx-1.5 h-[26px] min-w-[124px] max-w-[clamp(124px,16vw,200px)] flex-none self-center pr-1.5 pl-2',
                     )}
-                    aria-label={`Environment: ${label}. Select to change the active environment.`}
+                    aria-label={`Environment: ${label}. Select to change the collection’s environment.`}
                     // A name too long for the control is truncated, so the full one stays readable on hover.
                     title={label}
                     data-empty={!active || undefined}
@@ -84,8 +87,13 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
                 </UnstyledButton>
             </Menu.Target>
             <Menu.Dropdown>
-                <Menu.Label>Environment for this request</Menu.Label>
+                <Menu.Label>
+                    {collectionId
+                        ? `Environment for “${collectionName}”`
+                        : 'Add this request to a collection to link an environment'}
+                </Menu.Label>
                 <Menu.Item
+                    disabled={!collectionId}
                     leftSection={check(!active)}
                     aria-current={!active ? 'true' : undefined}
                     onClick={() => choose(null)}
@@ -95,6 +103,7 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
                 {environments.map((environment) => (
                     <Menu.Item
                         key={environment.id}
+                        disabled={!collectionId}
                         leftSection={check(environment.id === active?.id)}
                         aria-current={environment.id === active?.id ? 'true' : undefined}
                         onClick={() => choose(environment.id)}

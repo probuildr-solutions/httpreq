@@ -65,3 +65,9 @@ export const isTrustedRendererUrl = (url: string | undefined, devServer: string 
     }
     return url.startsWith('file://');
 };
+
+/** The most text one clipboard write may carry; larger payloads are refused, not truncated. */
+export const MAX_CLIPBOARD_CHARS = 10_000_000;
+
+export const isClipboardText = (value: unknown): value is string =>
+    typeof value === 'string' && value.length <= MAX_CLIPBOARD_CHARS;

@@ -5,6 +5,7 @@
 
 import { IconCopy, IconDownload, IconTerminal2 } from '@tabler/icons-react';
 import { useState } from 'react';
+import { copyText } from '../clipboard';
 import { Badge, Button, Code, Group, notifications, Stack, Text, Title } from '../kit';
 
 interface Props {
@@ -35,7 +36,7 @@ export function SharingPanel({
         try {
             const command = await buildCurl();
             setCurl(command);
-            await navigator.clipboard.writeText(command);
+            await copyText(command);
             notifications.show({ color: 'teal', message: 'cURL command copied to the clipboard.' });
         } catch (error) {
             notifications.show({
@@ -55,8 +56,8 @@ export function SharingPanel({
                     Copy as cURL
                 </Title>
                 <Text size="xs" className="text-dimmed">
-                    Uses the active environment. Secret variables stay as <Code>{'{{name}}'}</Code>{' '}
-                    references.
+                    Uses the collection’s environment. Secret variables stay as{' '}
+                    <Code>{'{{name}}'}</Code> references.
                 </Text>
                 <Group>
                     <Button

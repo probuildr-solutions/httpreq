@@ -17,6 +17,7 @@ import {
     type TextContentType,
 } from '@httpreq/shared';
 import { formatBytes, hasAttachment, rememberFile } from '../attachments';
+import { prettyXmlText } from '../prettyText';
 import { CodeEditor } from './CodeEditor';
 import { KeyValueTable } from './KeyValueTable';
 import {
@@ -32,21 +33,32 @@ import {
     cx,
 } from '../kit';
 
-const MODES: { value: BodyMode; label: string }[] = [
+/** The body types in the selector; `raw` covers the JSON and text modes of the stored body. */
+type BodyType = Exclude<BodyMode, 'json' | 'text'> | 'raw';
+
+const MODES: { value: BodyType; label: string }[] = [
     { value: 'none', label: 'None' },
-    { value: 'json', label: 'JSON' },
-    { value: 'text', label: 'Text' },
+    { value: 'raw', label: 'Raw' },
     { value: 'form-urlencoded', label: 'Form URL Encoded' },
     { value: 'multipart', label: 'Multipart Form' },
     { value: 'binary', label: 'Binary' },
 ];
 
-const TEXT_TYPES: Record<TextContentType, { label: string; language: string }> = {
-    'text/plain': { label: 'Plain text', language: 'plaintext' },
+/** A raw body is JSON, or text with one of the content types below. */
+type RawFormat = 'json' | TextContentType;
+
+const RAW_FORMATS: Record<RawFormat, { label: string; language: string }> = {
+    json: { label: 'JSON', language: 'json' },
+    'text/plain': { label: 'Text', language: 'plaintext' },
     'application/xml': { label: 'XML', language: 'xml' },
     'text/html': { label: 'HTML', language: 'html' },
     'application/javascript': { label: 'JavaScript', language: 'javascript' },
 };
+
+const RAW_FORMAT_OPTIONS = (['json', ...TEXT_CONTENT_TYPES] as RawFormat[]).map((value) => ({
+    value,
+    label: RAW_FORMATS[value].label,
+}));
 
 /** JSON validity ignoring `{{variables}}`, which are substituted before sending. */
 const jsonError = (text: string): string | null => {
@@ -67,70 +79,100 @@ interface Props {
 export function BodyPanel({ request, onChange }: Props) {
     const { body } = request;
     const setBody = (patch: Partial<RequestBody>) => onChange({ body: { ...body, ...patch } });
-    const jsonEditor = useRef<editor.IStandaloneCodeEditor | null>(null);
+    const rawEditor = useRef<editor.IStandaloneCodeEditor | null>(null);
+    const raw = body.mode === 'json' || body.mode === 'text';
+    const rawFormat: RawFormat = body.mode === 'json' ? 'json' : body.textContentType;
+    const rawContent = body.mode === 'json' ? body.json : body.text;
     const error = useMemo(
         () => (body.mode === 'json' ? jsonError(body.json) : null),
         [body.mode, body.json],
     );
+
+    const selectType = (type: BodyType) => {
+        if (type !== 'raw') return setBody({ mode: type });
+        if (raw) return;
+        // Return to whichever raw format was used last.
+        setBody({ mode: body.text.trim() && !body.json.trim() ? 'text' : 'json' });
+    };
+    // JSON and the text formats keep their content in different fields; the editor shows one
+    // body, so switching format between them carries what is typed across.
+    const selectFormat = (format: RawFormat) => {
+        if (format === 'json') {
+            setBody({ mode: 'json', json: body.mode === 'text' ? body.text : body.json });
+        } else {
+            setBody({
+                mode: 'text',
+                textContentType: format,
+                text: body.mode === 'json' ? body.json : body.text,
+            });
+        }
+    };
+    const format = () => {
+        const instance = rawEditor.current;
+        if (!instance) return;
+        if (rawFormat === 'application/xml') {
+            const pretty = prettyXmlText(instance.getValue());
+            if (pretty.ok) {
+                instance.executeEdits('format', [
+                    { range: instance.getModel()!.getFullModelRange(), text: pretty.text },
+                ]);
+            }
+        } else {
+            void instance.getAction('editor.action.formatDocument')?.run();
+        }
+    };
+    const canFormat = rawFormat === 'json' || rawFormat === 'application/xml';
     const noBodyMethod = request.method === 'GET' || request.method === 'HEAD';
 
     return (
         <Stack gap="xs" className="min-h-0 flex-1">
-            <Group gap="xs" justify="space-between" wrap="nowrap" className="flex-none">
-                <div className="no-scrollbar min-w-0 overflow-x-auto">
+            <Group gap="xs" justify="space-between" className="flex-none">
+                <div className="no-scrollbar max-w-full min-w-0 overflow-x-auto">
                     <SegmentedControl
                         size="xs"
                         aria-label="Body type"
-                        value={body.mode}
-                        onChange={(mode) => setBody({ mode: mode as BodyMode })}
+                        value={raw ? 'raw' : body.mode}
+                        onChange={(type) => selectType(type as BodyType)}
                         data={MODES}
                     />
                 </div>
-                {body.mode === 'json' && (
-                    <Group gap={6} wrap="nowrap">
-                        {error ? (
-                            <Tooltip label={error} w={320}>
-                                <Badge color="red" variant="light" radius="xs">
-                                    Invalid JSON
-                                </Badge>
-                            </Tooltip>
-                        ) : (
-                            body.json.trim() && (
-                                <Badge color="teal" variant="light" radius="xs">
-                                    Valid JSON
-                                </Badge>
-                            )
+                {raw && (
+                    <Group gap={6} wrap="nowrap" className="flex-none">
+                        {rawFormat === 'json' &&
+                            (error ? (
+                                <Tooltip label={error} w={320}>
+                                    <Badge color="red" variant="light" radius="xs">
+                                        Invalid JSON
+                                    </Badge>
+                                </Tooltip>
+                            ) : (
+                                body.json.trim() && (
+                                    <Badge color="teal" variant="light" radius="xs">
+                                        Valid JSON
+                                    </Badge>
+                                )
+                            ))}
+                        {canFormat && (
+                            <Button
+                                size="compact-xs"
+                                variant="subtle"
+                                color="gray"
+                                leftSection={<IconWand size={13} />}
+                                onClick={format}
+                                title="Format (Shift+Alt+F)"
+                            >
+                                Format
+                            </Button>
                         )}
-                        <Button
-                            size="compact-xs"
-                            variant="subtle"
-                            color="gray"
-                            leftSection={<IconWand size={13} />}
-                            onClick={() =>
-                                void jsonEditor.current
-                                    ?.getAction('editor.action.formatDocument')
-                                    ?.run()
-                            }
-                            title="Format (Shift+Alt+F)"
-                        >
-                            Format
-                        </Button>
+                        <Select
+                            size="xs"
+                            aria-label="Raw body format"
+                            value={rawFormat}
+                            data={RAW_FORMAT_OPTIONS}
+                            onChange={(value) => value && selectFormat(value as RawFormat)}
+                            className="w-[130px]"
+                        />
                     </Group>
-                )}
-                {body.mode === 'text' && (
-                    <Select
-                        size="xs"
-                        aria-label="Text content type"
-                        value={body.textContentType}
-                        data={TEXT_CONTENT_TYPES.map((value) => ({
-                            value,
-                            label: TEXT_TYPES[value].label,
-                        }))}
-                        onChange={(value) =>
-                            value && setBody({ textContentType: value as TextContentType })
-                        }
-                        className="w-[140px]"
-                    />
                 )}
             </Group>
 
@@ -146,23 +188,16 @@ export function BodyPanel({ request, onChange }: Props) {
                     This request has no body.
                 </Text>
             )}
-            {body.mode === 'json' && (
+            {raw && (
                 <CodeEditor
                     className="min-h-40 flex-1"
-                    language="json"
-                    ariaLabel="JSON body"
-                    value={body.json}
-                    onChange={(json) => setBody({ json })}
-                    onEditor={(instance) => (jsonEditor.current = instance)}
-                />
-            )}
-            {body.mode === 'text' && (
-                <CodeEditor
-                    className="min-h-40 flex-1"
-                    language={TEXT_TYPES[body.textContentType].language}
-                    ariaLabel="Text body"
-                    value={body.text}
-                    onChange={(text) => setBody({ text })}
+                    language={RAW_FORMATS[rawFormat].language}
+                    ariaLabel={`${RAW_FORMATS[rawFormat].label} body`}
+                    value={rawContent}
+                    onChange={(content) =>
+                        setBody(body.mode === 'json' ? { json: content } : { text: content })
+                    }
+                    onEditor={(instance) => (rawEditor.current = instance)}
                 />
             )}
             {body.mode === 'form-urlencoded' && (

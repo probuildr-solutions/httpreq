@@ -64,23 +64,27 @@ export const getAncestors = (workspace: Workspace, id: string): ContainerNode[] 
     return path;
 };
 
-/**
- * The environment to activate when `id` is selected: the one linked to the request itself, else
- * the one linked to its nearest folder or collection. `null` when nothing is linked (or the
- * linked environment no longer exists), which the UI shows as "No environment".
- */
-export const linkedEnvironmentId = (workspace: Workspace, id: string): string | null => {
+/** The collection that contains `id` (or `id` itself when it is a collection). */
+export const collectionIdOf = (workspace: Workspace, id: string): string | null => {
     const self = findNode(workspace, id);
     if (!self) return null;
-    const chain = [self, ...getAncestors(workspace, id).reverse()];
-    for (const item of chain) {
-        if (item.kind === 'websocket') continue;
-        const linked = item.node.environmentId;
-        if (linked && workspace.environments.some((environment) => environment.id === linked)) {
-            return linked;
-        }
-    }
-    return null;
+    if (self.kind === 'collection') return self.node.id;
+    const root = getAncestors(workspace, id)[0];
+    return root?.kind === 'collection' ? root.node.id : null;
+};
+
+/**
+ * The environment `id` runs with: the one linked to its collection, which every folder, nested
+ * folder and request in the collection inherits. `null` when the collection has none (or its
+ * environment no longer exists), and for anything outside a collection, which the UI shows as
+ * "No environment".
+ */
+export const linkedEnvironmentId = (workspace: Workspace, id: string): string | null => {
+    const collectionId = collectionIdOf(workspace, id);
+    const linked = workspace.collections.find((item) => item.id === collectionId)?.environmentId;
+    return linked && workspace.environments.some((environment) => environment.id === linked)
+        ? linked
+        : null;
 };
 
 export const isAncestorOf = (workspace: Workspace, ancestorId: string, id: string) =>
@@ -275,6 +279,7 @@ const cloneRequest = (request: HttpRequest, parentId: string | null): HttpReques
         id: createId(),
         parentId,
         params: rekey(copy.params),
+        ...(copy.pathVariables ? { pathVariables: rekey(copy.pathVariables) } : {}),
         headers: rekey(copy.headers),
         body: {
             ...copy.body,

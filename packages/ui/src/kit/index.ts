@@ -64,7 +64,7 @@ export {
     type ColorSchemePreference,
 } from './colorScheme';
 export { PICKER_TRIGGER, STATUS_ROW, TRUNCATE_NAME } from './styles';
-export { FORM_DENSITY, type Tone } from './tones';
+export { type Tone } from './tones';
 
 /** Namespace so callers write `Input.Wrapper`, the way the labelled-field pieces read. */
 export const Input = { Wrapper: InputWrapper };

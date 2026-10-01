@@ -7,7 +7,7 @@ import {
     IconBraces,
     IconClock,
     IconDatabase,
-    IconDeviceFloppy,
+    IconDownload,
     IconSearch,
     IconWaveSine,
 } from '@tabler/icons-react';
@@ -244,31 +244,6 @@ export function ResponsePanel({ response, stream, loading, onStop }: Props) {
                     </Tabs.Tab>
                 </ScrollableTabsList>
                 <div className="flex min-w-0 flex-[1_1_auto] items-center justify-end gap-2">
-                    {canSearch && (
-                        <Tooltip label="Search in response (Ctrl+F)">
-                            <ActionIcon
-                                variant={searchOpen ? 'light' : 'subtle'}
-                                size="sm"
-                                aria-label="Search in response"
-                                aria-pressed={searchOpen}
-                                onClick={() => (searchOpen ? closeSearch() : openSearch())}
-                            >
-                                <IconSearch size={15} />
-                            </ActionIcon>
-                        </Tooltip>
-                    )}
-                    {response && (
-                        <Tooltip label="Save response to file">
-                            <ActionIcon
-                                variant="subtle"
-                                size="sm"
-                                aria-label="Save response to file"
-                                onClick={() => saveResponse(response)}
-                            >
-                                <IconDeviceFloppy size={15} />
-                            </ActionIcon>
-                        </Tooltip>
-                    )}
                     {kind && !isStream && !isBinary && (
                         <SegmentedControl
                             size="xs"
@@ -326,6 +301,34 @@ export function ResponsePanel({ response, stream, loading, onStop }: Props) {
                             </>
                         )}
                     </div>
+                    {/* Search and download sit at the far right, apart from the summary they act on. */}
+                    <div className="flex flex-none items-center gap-1">
+                        {canSearch && (
+                            <Tooltip label="Search in response (Ctrl+F)">
+                                <ActionIcon
+                                    variant={searchOpen ? 'light' : 'default'}
+                                    size="sm"
+                                    aria-label="Search in response"
+                                    aria-pressed={searchOpen}
+                                    onClick={() => (searchOpen ? closeSearch() : openSearch())}
+                                >
+                                    <IconSearch size={15} />
+                                </ActionIcon>
+                            </Tooltip>
+                        )}
+                        {response && (
+                            <Tooltip label="Download response">
+                                <ActionIcon
+                                    variant="default"
+                                    size="sm"
+                                    aria-label="Download response"
+                                    onClick={() => saveResponse(response)}
+                                >
+                                    <IconDownload size={15} />
+                                </ActionIcon>
+                            </Tooltip>
+                        )}
+                    </div>
                 </div>
             </div>
 
@@ -374,7 +377,7 @@ export function ResponsePanel({ response, stream, loading, onStop }: Props) {
                                     <Button
                                         size="compact-xs"
                                         variant="light"
-                                        leftSection={<IconDeviceFloppy size={13} />}
+                                        leftSection={<IconDownload size={13} />}
                                         onClick={() => saveResponse(response)}
                                     >
                                         Save to file…
@@ -431,12 +434,21 @@ export function ResponsePanel({ response, stream, loading, onStop }: Props) {
                 )}
             </Tabs.Panel>
             <Tabs.Panel value="headers" keepMounted className="min-h-0 flex-1 overflow-auto p-2.5">
-                <Table className="hr-mono border border-line">
+                {/* A fixed layout: the key column keeps one width and the value takes the rest. */}
+                <Table className="hr-mono table-fixed border border-line">
+                    <colgroup>
+                        <col className="w-[clamp(120px,32%,260px)]" />
+                        <col />
+                    </colgroup>
                     <Table.Tbody>
                         {Object.entries(head.headers).map(([key, value]) => (
                             <Table.Tr key={key} className="odd:bg-hover hover:bg-pressed">
-                                <Table.Td className="font-semibold break-all">{key}</Table.Td>
-                                <Table.Td className="break-all">{value}</Table.Td>
+                                <Table.Td className="px-2 align-top font-semibold [overflow-wrap:anywhere]">
+                                    {key}
+                                </Table.Td>
+                                <Table.Td className="px-2 align-top [overflow-wrap:anywhere]">
+                                    {value}
+                                </Table.Td>
                             </Table.Tr>
                         ))}
                     </Table.Tbody>

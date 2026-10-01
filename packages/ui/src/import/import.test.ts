@@ -100,7 +100,13 @@ const openApi = {
                 },
             },
         },
-        '/pets/{petId}': { delete: { summary: 'Delete a pet', security: [] } },
+        '/pets/{petId}': {
+            parameters: [
+                { name: 'petId', in: 'path', required: true, description: 'Pet id', example: 7 },
+            ],
+            delete: { summary: 'Delete a pet', security: [] },
+        },
+        '/files/{name}.json': { get: { summary: 'Get file' } },
     },
 };
 
@@ -120,8 +126,13 @@ describe('file import', () => {
         ).toEqual([
             'GET List pets {{base_url}}/pets?limit=10',
             'POST createPet {{base_url}}/pets',
-            'DELETE Delete a pet {{base_url}}/pets/{{petId}}',
+            'DELETE Delete a pet {{base_url}}/pets/:petId',
+            'GET Get file {{base_url}}/files/{{name}}.json',
         ]);
+        expect(plan.requests[2]!.pathVariables).toMatchObject([
+            { key: 'petId', value: '7', description: 'Pet id' },
+        ]);
+        expect(plan.requests[3]!.pathVariables).toBeUndefined();
         expect(JSON.parse(plan.requests[1]!.body.json)).toEqual({ name: 'Rex', tags: ['string'] });
         expect(plan.requests[2]!.auth).toEqual({ type: 'none' });
         expect(plan.environment?.variables.find((item) => item.key === 'base_url')?.value).toBe(
@@ -182,7 +193,8 @@ describe('file import', () => {
             prefix: 'Bearer',
         });
         expect(plan.folders.map((folder) => folder.name)).toEqual(['Orders']);
-        expect(plan.requests[0]!.url).toBe('{{host}}/orders/{{id}}');
+        expect(plan.requests[0]!.url).toBe('{{host}}/orders/:id');
+        expect(plan.requests[0]!.pathVariables).toMatchObject([{ key: 'id', value: '' }]);
         expect(plan.requests[1]!.headers[0]!.enabled).toBe(false);
         expect(plan.requests[1]!.body.json).toBe('{\n    "qty": 1\n}');
         expect(plan.environment).toEqual({
@@ -290,10 +302,10 @@ describe('applying imports', () => {
         const result = applyImportPlan(createWorkspace('W'), plan, 'merge');
         expect(result.kind).toBe('collection');
         expect(result.workspace.collections).toHaveLength(1);
-        expect(result.workspace.requests).toHaveLength(3);
+        expect(result.workspace.requests).toHaveLength(4);
         expect(result.workspace.environments.map((item) => item.name)).toEqual(['Pets']);
         expect(result.message).toMatch(
-            /^Collection “Pets” with 3 requests in 1 folder; created environment/,
+            /^Collection “Pets” with 4 requests in 1 folder; created environment/,
         );
     });
 

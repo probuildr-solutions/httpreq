@@ -9,6 +9,7 @@ import {
     createFolder,
     createKeyValue,
     isHttpMethod,
+    syncPathVariables,
     type AuthConfig,
     type Folder,
     type HttpRequest,
@@ -115,8 +116,15 @@ const exampleFor = (
 const exampleText = (value: unknown) =>
     value === undefined || value === null ? '' : typeof value === 'string' ? value : String(value);
 
-/** OpenAPI `{name}` path templates become `{{name}}` variables. */
-const pathTemplate = (path: string) => path.replace(/\{([^}/]+)\}/g, '{{$1}}');
+/**
+ * OpenAPI `{name}` path templates keep their parameters as `:name` path variables. A parameter
+ * that shares its segment with other text (`/files/{name}.json`) cannot be one, so it becomes a
+ * `{{name}}` environment variable instead.
+ */
+const pathTemplate = (path: string) =>
+    path
+        .replace(/(?<=\/)\{([A-Za-z_][\w.-]*)\}(?=\/|$)/g, ':$1')
+        .replace(/\{([^}/]+)\}/g, '{{$1}}');
 
 const variableName = (name: string) => name.replace(/[^\w.-]+/g, '_');
 
@@ -277,6 +285,7 @@ export const fromOpenApi = (doc: Json, fileName: string): ImportPlan => {
                     parameters.set(`${str(parameter.in)}:${str(parameter.name)}`, parameter);
             }
             const params: KeyValueItem[] = [];
+            const pathValues = new Map<string, KeyValueItem>();
             const headers: KeyValueItem[] = [];
             const formFields: MultipartField[] = [];
             let bodySchema: unknown;
@@ -293,6 +302,9 @@ export const fromOpenApi = (doc: Json, fileName: string): ImportPlan => {
                         : '';
                 const description = str(parameter.description) || undefined;
                 switch (parameter.in) {
+                    case 'path':
+                        pathValues.set(name, createKeyValue({ key: name, value, description }));
+                        break;
                     case 'query':
                         params.push(
                             createKeyValue({
@@ -331,6 +343,10 @@ export const fromOpenApi = (doc: Json, fileName: string): ImportPlan => {
             const enabledParams = params.filter((param) => param.enabled);
             request.url = urlWithParams(`{{base_url}}${pathTemplate(path)}`, enabledParams);
             request.params = [...enabledParams, ...params.filter((param) => !param.enabled)];
+            request.pathVariables = syncPathVariables(request.url).map(
+                (row) => pathValues.get(row.key) ?? row,
+            );
+            if (!request.pathVariables.length) delete request.pathVariables;
             request.headers = headers;
 
             // Request body: JSON first, then forms, XML and plain text.

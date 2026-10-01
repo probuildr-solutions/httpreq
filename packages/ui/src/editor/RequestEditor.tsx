@@ -12,11 +12,13 @@ import {
 } from '@httpreq/api-client';
 import {
     createKeyValue,
+    syncPathVariables,
     type HttpMethod,
     type HttpRequest,
     type KeyValueItem,
 } from '@httpreq/shared';
 import { getAncestors, paramsFromUrl, urlWithParams } from '@httpreq/workspace';
+import { copyText } from '../clipboard';
 import { AuthorizationPanel } from '../auth/AuthorizationPanel';
 import { ScrollableTabsList } from '../ScrollableTabsList';
 import { openExportDialog } from '../export/exportDialogStore';
@@ -26,6 +28,7 @@ import { BodyPanel } from './BodyPanel';
 import { Breadcrumb } from './Breadcrumb';
 import { KeyValueTable, type LockedRow } from './KeyValueTable';
 import { OverviewPanel } from './OverviewPanel';
+import { PathVariablesTable } from './PathVariablesTable';
 import { ScriptsPanel } from './ScriptsPanel';
 import { SettingsPanel } from './SettingsPanel';
 import { SharingPanel } from './SharingPanel';
@@ -157,7 +160,7 @@ export function RequestEditor({
     const copyCurl = useCallback(async () => {
         if (!request) return;
         try {
-            await navigator.clipboard.writeText(await buildCurl(request));
+            await copyText(await buildCurl(request));
             notifications.show({ color: 'teal', message: 'cURL command copied to the clipboard.' });
         } catch (error) {
             notifications.show({
@@ -215,7 +218,13 @@ export function RequestEditor({
                 method={request.method}
                 url={request.url}
                 onMethodChange={(method: HttpMethod) => onChange({ method })}
-                onUrlChange={(url) => onChange({ url, params: paramsFromUrl(url, request.params) })}
+                onUrlChange={(url) =>
+                    onChange({
+                        url,
+                        params: paramsFromUrl(url, request.params),
+                        pathVariables: syncPathVariables(url, request.pathVariables),
+                    })
+                }
                 urlRef={urlRef}
                 sending={sending}
                 onSend={onSend}
@@ -287,6 +296,10 @@ export function RequestEditor({
                         onChange={(params) =>
                             onChange({ params, url: urlWithParams(request.url, params) })
                         }
+                    />
+                    <PathVariablesTable
+                        items={request.pathVariables ?? []}
+                        onChange={(pathVariables) => onChange({ pathVariables })}
                     />
                 </Tabs.Panel>
                 <Tabs.Panel

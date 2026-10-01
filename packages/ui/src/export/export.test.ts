@@ -201,7 +201,7 @@ describe('OpenAPI export', () => {
             if (plan.type !== 'collection') throw new Error('expected a collection');
             expect(plan.requests.map((request) => [request.method, request.url]).sort()).toEqual([
                 ['GET', '{{base_url}}/users?page=2'],
-                ['POST', '{{base_url}}/users/{{id}}'],
+                ['POST', '{{base_url}}/users/:id'],
             ]);
             expect(plan.environment?.variables.find((item) => item.key === 'base_url')?.value).toBe(
                 'https://api.example.com',

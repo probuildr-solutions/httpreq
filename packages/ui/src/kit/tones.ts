@@ -68,10 +68,3 @@ export const toneClasses = (variant: ToneVariant, tone: Tone): string =>
 /** The neutral treatment shared by `default` buttons: a bordered control on the field surface. */
 export const DEFAULT_CONTROL =
     'border border-line bg-field text-fg hover:bg-hover active:bg-pressed';
-
-/**
- * Form density for editor panes (authorization, request settings). Default `sm` controls are 36px
- * tall while the app's variable-aware fields are 30px; inside a container carrying this class,
- * selects, number fields and buttons take the same 30px, so a form never mixes two heights.
- */
-export const FORM_DENSITY = '[--control-h:1.875rem]';

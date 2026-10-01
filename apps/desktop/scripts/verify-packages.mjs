@@ -49,6 +49,9 @@ const expected = {
     ],
 };
 
+/** The metadata the installed app's updater reads from the release; it must name this version. */
+const updateMetadata = { win: 'latest.yml', mac: 'latest-mac.yml', linux: 'latest-linux.yml' };
+
 const platform = process.argv[2];
 if (!expected[platform]) {
     console.error(`Usage: verify-packages.mjs <${Object.keys(expected).join('|')}>`);
@@ -63,6 +66,23 @@ const packages = expected[platform].map((pattern) => {
     else if (statSync(join(release, name)).size === 0) errors.push(`${name} is empty.`);
     return name;
 });
+
+// Without its update metadata a release cannot be installed over by the app's auto-updater.
+const metadataName = updateMetadata[platform];
+if (!files.includes(metadataName)) {
+    errors.push(`Missing update metadata ${metadataName} in ${release}.`);
+} else {
+    const metadata = readFileSync(join(release, metadataName), 'utf8');
+    if (!new RegExp(`^version: ['"]?${v}['"]?\\s*$`, 'm').test(metadata)) {
+        errors.push(`${metadataName} does not report version ${version}.`);
+    }
+    for (const name of packages.filter(Boolean)) {
+        // The deb and dmg are for first installs; only the files the updater downloads are listed.
+        if (/\.(exe|zip|AppImage)$/.test(name) && !metadata.includes(name.replaceAll(' ', '-'))) {
+            errors.push(`${metadataName} does not list ${name}.`);
+        }
+    }
+}
 
 // The version baked into each packaged app.
 const { extractFile, listPackage } = require('@electron/asar');

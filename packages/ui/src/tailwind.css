@@ -30,6 +30,15 @@
         'JetBrains Mono', 'Cascadia Code', 'SF Mono', SFMono-Regular, Menlo, Consolas,
         'Liberation Mono', monospace;
 
+    /*
+     * The single size of every one-line control: text inputs, selects and dropdown triggers,
+     * password and number fields, variable-aware fields and default buttons all take this height
+     * and horizontal padding, so a form never mixes two heights. Components read the tokens; a
+     * screen that needs a denser or roomier form overrides them on its container.
+     */
+    --control-h: 1.875rem;
+    --control-px: 0.5625rem;
+
     /* Poppins runs wide, so the desktop scale is a notch more compact than Tailwind's. */
     --text-2xs: 0.6875rem;
     --text-xs: 0.71875rem;

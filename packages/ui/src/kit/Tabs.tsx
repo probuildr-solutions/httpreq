@@ -107,8 +107,13 @@ function TabsTab({
                 select(value);
             }}
             className={cx(
-                'inline-flex flex-none items-center gap-1 border-0 border-b-2 border-transparent bg-transparent px-2.5 py-[7px] text-[12.5px] whitespace-nowrap',
-                'text-dimmed transition-colors hover:bg-hover hover:text-fg',
+                'relative isolate inline-flex flex-none items-center gap-1 border-0 border-b-2 border-transparent bg-transparent px-2.5 py-[7px] text-[12.5px] whitespace-nowrap',
+                'text-dimmed transition-colors hover:text-fg',
+                // The hover chip is a pseudo-element inside the tab's padding box: it draws a light
+                // rounded border and fill without touching the tab's own border or size, so
+                // hovering never shifts or overlaps the neighbouring tabs or the rule under them.
+                'before:pointer-events-none before:absolute before:inset-x-1 before:inset-y-[3px] before:-z-10 before:rounded-sm before:border before:border-transparent before:transition-colors',
+                'hover:before:border-line hover:before:bg-hover',
                 'data-[active]:border-primary data-[active]:text-fg',
                 className,
             )}

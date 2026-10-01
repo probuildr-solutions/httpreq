@@ -33,6 +33,7 @@ import {
     getAncestors,
     insertLeafCopy,
     isLeafNode,
+    collectionIdOf,
     linkedEnvironmentId,
     moveNode as moveTreeNode,
     renameNode as renameTreeNode,
@@ -188,10 +189,9 @@ export interface WorkbenchState
     deleteEnvironment: (id: string) => void;
     /** Deletes several environments in one change, closing their tabs. */
     deleteEnvironments: (ids: Iterable<string>) => void;
-    setActiveEnvironment: (id: string | null) => void;
     /**
-     * Links an environment to a collection, folder or request (`null` unlinks), then re-derives the
-     * active environment for the current selection.
+     * Links an environment to the collection that contains `id` (`null` unlinks); its folders and
+     * requests inherit it. Does nothing for a request that is not in a collection.
      */
     linkEnvironment: (id: string, environmentId: string | null) => void;
     /** Creates or updates a variable in the active environment (e.g. a retrieved OAuth token). */
@@ -226,9 +226,9 @@ const withStructure = (edited: HttpRequest, saved: HttpRequest): HttpRequest => 
 };
 
 /**
- * Makes the environment linked to `id` (its own, else its collection's) the active one, or none
- * when nothing is linked, so the environment shown always belongs to what is selected. This is
- * derived from the selection and deliberately does not touch `updatedAt`.
+ * Makes the environment linked to the collection of `id` the active one, or none when nothing is
+ * linked, so the environment shown always belongs to what is selected. There is no manual
+ * switch: this is derived from the selection and deliberately does not touch `updatedAt`.
  */
 const activateFor = (workspace: Workspace, id: string | null): Workspace => {
     if (!id) return workspace;
@@ -867,28 +867,18 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get, api) => ({
         });
     },
 
-    setActiveEnvironment: (activeEnvironmentId) =>
-        set((state) => ({ workspace: touch(state.workspace, { activeEnvironmentId }) })),
-
     linkEnvironment: (id, environmentId) =>
         set((state) => {
-            const link = <T extends { id: string; environmentId?: string | null }>(items: T[]) =>
-                items.map((item) =>
-                    item.id === id ? withEnvironmentLink(item, environmentId) : item,
-                );
-            const draft = state.drafts[id];
+            const collectionId = collectionIdOf(state.workspace, id);
+            if (!collectionId) return state;
             const workspace = touch(state.workspace, {
-                collections: link(state.workspace.collections),
-                folders: link(state.workspace.folders),
-                requests: link(state.workspace.requests),
-                // The environment chosen for what is selected is also the active one right away.
-                activeEnvironmentId: environmentId,
+                collections: state.workspace.collections.map((item) =>
+                    item.id === collectionId ? withEnvironmentLink(item, environmentId) : item,
+                ),
             });
+            // The environment shown follows the selection, so linking applies right away.
             return {
                 workspace: activateFor(workspace, state.activeRequestId ?? state.selectedNodeId),
-                drafts: draft
-                    ? { ...state.drafts, [id]: withEnvironmentLink(draft, environmentId) }
-                    : state.drafts,
             };
         }),
 

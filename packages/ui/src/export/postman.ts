@@ -115,7 +115,11 @@ const keyValues = (items: KeyValueItem[], typed = true) =>
         }));
 
 /** Splits a URL into Postman's parts, keeping `{{variables}}` intact; `raw` stays authoritative. */
-export const postmanUrl = (raw: string, params: KeyValueItem[]) => {
+export const postmanUrl = (
+    raw: string,
+    params: KeyValueItem[],
+    pathVariables: KeyValueItem[] = [],
+) => {
     const [beforeHash] = raw.split('#');
     const [base = ''] = (beforeHash ?? '').split('?');
     const protocolMatch = /^([a-z][\w+.-]*):\/\//i.exec(base);
@@ -133,6 +137,15 @@ export const postmanUrl = (raw: string, params: KeyValueItem[]) => {
         ...(portMatch ? { port: portMatch[1] } : {}),
         path: path ? path.split('/') : [],
         ...(query.length ? { query } : {}),
+        ...(pathVariables.length
+            ? {
+                  variable: pathVariables.map((item) => ({
+                      key: item.key,
+                      value: item.value,
+                      ...(item.description ? { description: item.description } : {}),
+                  })),
+              }
+            : {}),
     };
 };
 
@@ -204,7 +217,7 @@ const postmanItem = (request: HttpRequest, warnings: Set<string>): Json => {
             method: request.method,
             header: keyValues(request.headers),
             ...(body ? { body } : {}),
-            url: postmanUrl(request.url, request.params),
+            url: postmanUrl(request.url, request.params, request.pathVariables),
             ...(auth ? { auth } : {}),
             ...(request.description ? { description: request.description } : {}),
         },

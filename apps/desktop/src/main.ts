@@ -6,6 +6,7 @@
 import {
     app,
     BrowserWindow,
+    clipboard,
     ipcMain,
     Menu,
     nativeTheme,
@@ -39,10 +40,12 @@ import {
     lockDownWebContents,
 } from './security';
 import { registerServices } from './services';
+import { createUpdateController, loadElectronUpdater, supportsSelfUpdate } from './updater';
 import { loadWindowState, resolveWindowBounds, saveWindowState } from './windowState';
 import {
     isAllowedExternalUrl,
     isAuthorizationUrl,
+    isClipboardText,
     isTrustedRendererUrl,
     nextZoomLevel,
 } from './shell';
@@ -237,11 +240,57 @@ ipcMain.handle('net:check', async (event): Promise<boolean> => {
     }
 });
 
+/*
+ * Clipboard access goes through the main process. The renderer's Clipboard API is denied here (all
+ * web permissions are), and it also needs a live user gesture, which is gone by the time a cURL
+ * command has been built. Only the app's own document may use these, and only plain text moves.
+ */
+ipcMain.handle('clipboard:write-text', async (event, text: unknown): Promise<boolean> => {
+    if (!isTrustedSender(event) || !isClipboardText(text)) return false;
+    await clipboard.writeText(text);
+    return true;
+});
+
+ipcMain.handle('clipboard:read-text', async (event): Promise<string> =>
+    isTrustedSender(event) ? await clipboard.readText() : '',
+);
+
 /**
  * WebSocket, SSH and tunnel services. Registered once, before the first window exists, so their
  * IPC handlers are in place by the time the renderer loads.
  */
 const services = registerServices({ isTrustedSender });
+
+/*
+ * Background updates. A failure here only ever becomes an `error` state shown to the user: the
+ * installed version keeps starting and running whatever the update feed does.
+ */
+let shuttingDown = false;
+const updates = createUpdateController({
+    loadUpdater: loadElectronUpdater,
+    supported: supportsSelfUpdate(app.isPackaged, process.platform, process.env),
+    onState: (state) => {
+        for (const window of BrowserWindow.getAllWindows()) {
+            if (!window.isDestroyed()) window.webContents.send('updates:state-changed', state);
+        }
+    },
+    // Sockets, shells and tunnels are closed before the installer takes over, and the quit handler
+    // below is told not to hold the quit again.
+    prepareInstall: async () => {
+        shuttingDown = true;
+        await services.disposeAll();
+    },
+});
+
+ipcMain.handle('updates:state', (event) =>
+    isTrustedSender(event) ? updates.getState() : { status: 'idle' },
+);
+ipcMain.handle('updates:check', (event) =>
+    isTrustedSender(event) ? updates.check() : { status: 'idle' },
+);
+ipcMain.on('updates:install', (event) => {
+    if (isTrustedSender(event)) void updates.install();
+});
 
 const WINDOW_DEFAULTS = { width: 1440, height: 920, minWidth: 900, minHeight: 600 };
 
@@ -349,6 +398,7 @@ app.whenReady().then(async () => {
             : null,
     );
     await createWindow();
+    updates.start();
     app.on('activate', () => {
         if (BrowserWindow.getAllWindows().length === 0) void createWindow();
     });
@@ -358,7 +408,6 @@ app.whenReady().then(async () => {
  * Quitting is held just long enough to close every socket, SSH channel and listening port, so
  * HttpReq never leaves an orphan session or an occupied local port behind.
  */
-let shuttingDown = false;
 app.on('before-quit', (event) => {
     if (shuttingDown) return;
     event.preventDefault();

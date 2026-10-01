@@ -6,6 +6,7 @@
 export * from './equality';
 export * from './capabilities';
 export * from './model';
+export * from './pathVariables';
 export * from './ssh';
 export * from './validation';
 export * from './websocket';
@@ -266,6 +267,57 @@ export interface AppInfo {
     versions: { electron: string; chrome: string; node: string };
 }
 
+/**
+ * Where the desktop auto-updater is. `available` and `downloading` happen without interrupting
+ * the user; `ready` means the new version is downloaded and installing restarts the app.
+ * `unsupported` is a build that cannot replace itself (a Linux package, an unsigned macOS app), so
+ * the user is pointed to the releases page instead.
+ */
+export type DesktopUpdateStatus =
+    | 'idle'
+    | 'checking'
+    | 'available'
+    | 'downloading'
+    | 'ready'
+    | 'current'
+    | 'error'
+    | 'unsupported';
+
+export interface DesktopUpdateState {
+    status: DesktopUpdateStatus;
+    /** The newer version, once known. */
+    version?: string;
+    /** Download progress, 0 to 100, while `downloading`. */
+    percent?: number;
+    /** What went wrong, when `error`. The installed version keeps working. */
+    error?: string;
+}
+
+export const DESKTOP_UPDATE_STATUSES: readonly DesktopUpdateStatus[] = [
+    'idle',
+    'checking',
+    'available',
+    'downloading',
+    'ready',
+    'current',
+    'error',
+    'unsupported',
+];
+
+export const isDesktopUpdateState = (value: unknown): value is DesktopUpdateState =>
+    !!value &&
+    typeof value === 'object' &&
+    (DESKTOP_UPDATE_STATUSES as readonly unknown[]).includes((value as DesktopUpdateState).status);
+
+export interface UpdatesBridge {
+    getState(): Promise<DesktopUpdateState>;
+    /** Looks for an update now (the periodic check runs on its own). */
+    check(): Promise<DesktopUpdateState>;
+    /** Quits and installs a downloaded update, then relaunches. Ignored unless one is ready. */
+    install(): void;
+    onStateChange(listener: (state: DesktopUpdateState) => void): () => void;
+}
+
 /** Desktop-shell operations exposed by the preload. Every call is validated in the main process. */
 export interface DesktopBridge {
     readonly platform: string;
@@ -278,6 +330,16 @@ export interface DesktopBridge {
     openAuthorizationUrl(url: string): void;
     /** Resolves whether the internet is reachable, using a native lightweight probe. */
     checkConnectivity(): Promise<boolean>;
+    /**
+     * Writes plain text to the system clipboard through Electron's clipboard module. The renderer's
+     * own Clipboard API is not used in the desktop app: its permission is denied there, and it
+     * also fails once a user gesture has expired (e.g. after building a cURL command).
+     */
+    writeClipboardText(text: string): Promise<void>;
+    /** Reads plain text from the system clipboard, for pasting into the terminal. */
+    readClipboardText(): Promise<string>;
+    /** Background updates; absent in builds that cannot update themselves (e.g. unpackaged). */
+    updates?: UpdatesBridge;
     onWindowStateChange(listener: (state: DesktopWindowState) => void): () => void;
     onMenuCommand(listener: (command: MenuCommand) => void): () => void;
 }

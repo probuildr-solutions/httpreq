@@ -180,6 +180,8 @@ export interface HttpRequest {
     url: string;
     /** Mirrors the URL's query string plus disabled parameters that are not in the URL. */
     params: KeyValueItem[];
+    /** Values for the `:name` segments of the URL; kept in step with the URL by the editor. */
+    pathVariables?: KeyValueItem[];
     headers: KeyValueItem[];
     body: RequestBody;
     auth: AuthConfig;
