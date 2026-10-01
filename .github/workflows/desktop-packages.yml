@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Yamatri Reddy
+# SPDX-License-Identifier: GPL-3.0-only
+
 # Builds the HttpReq desktop installers for Windows, macOS and Linux whenever main changes (a merged
 # pull request), uploads them as workflow artifacts and, for a release, publishes them to a GitHub
 # Release.
@@ -15,241 +18,241 @@
 name: Desktop packages
 
 on:
-  # A merged pull request is a push to main. Push runs always read the repository's secrets (so
-  # merges from forks are signed and released too) and only ever build code that is already on
-  # main. This replaces `pull_request_target`, which GitHub restricts on public repositories.
-  push:
-    branches: [main]
-  workflow_dispatch:
-    inputs:
-      release:
-        description: Publish the packages as the GitHub Release v<package.json version>
-        type: boolean
-        default: false
+    # A merged pull request is a push to main. Push runs always read the repository's secrets (so
+    # merges from forks are signed and released too) and only ever build code that is already on
+    # main. This replaces `pull_request_target`, which GitHub restricts on public repositories.
+    push:
+        branches: [main]
+    workflow_dispatch:
+        inputs:
+            release:
+                description: Publish the packages as the GitHub Release v<package.json version>
+                type: boolean
+                default: false
 
 permissions:
-  contents: read
+    contents: read
 
 jobs:
-  prepare:
-    name: Prepare
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      # To find the pull request a pushed commit came from, for its `release` label.
-      pull-requests: read
-    outputs:
-      sha: ${{ steps.sha.outputs.sha }}
-      version: ${{ steps.info.outputs.version }}
-      tag: ${{ steps.info.outputs.tag }}
-      release: ${{ steps.info.outputs.release }}
-      prerelease: ${{ steps.info.outputs.prerelease }}
-    steps:
-      # Pinned for every later job, so a newer push to main cannot change what is released.
-      - name: Resolve the commit to build
-        id: sha
-        run: echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+    prepare:
+        name: Prepare
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+            # To find the pull request a pushed commit came from, for its `release` label.
+            pull-requests: read
+        outputs:
+            sha: ${{ steps.sha.outputs.sha }}
+            version: ${{ steps.info.outputs.version }}
+            tag: ${{ steps.info.outputs.tag }}
+            release: ${{ steps.info.outputs.release }}
+            prerelease: ${{ steps.info.outputs.prerelease }}
+        steps:
+            # Pinned for every later job, so a newer push to main cannot change what is released.
+            - name: Resolve the commit to build
+              id: sha
+              run: echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.sha.outputs.sha }}
-          fetch-depth: 0
+            - uses: actions/checkout@v4
+              with:
+                  ref: ${{ steps.sha.outputs.sha }}
+                  fetch-depth: 0
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
 
-      - name: Find the merged pull request's labels
-        id: pr
-        if: github.event_name == 'push'
+            - name: Find the merged pull request's labels
+              id: pr
+              if: github.event_name == 'push'
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  SHA: ${{ steps.sha.outputs.sha }}
+              run: |
+                  # The merged pull request whose merge (or squash) commit is this push; none for a direct
+                  # push. A failed lookup only loses the label, never the version-change check.
+                  labels=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
+                    --jq "[.[] | select(.merged_at != null and .merge_commit_sha == \"$SHA\")][0].labels // [] | map(.name)" \
+                    || { echo "::warning::Could not look up the pull request for $SHA."; echo '[]'; })
+                  echo "labels=${labels:-[]}" >> "$GITHUB_OUTPUT"
+
+            - name: Check the version and decide whether this is a release
+              id: info
+              env:
+                  EVENT_NAME: ${{ github.event_name }}
+                  BASE_SHA: ${{ github.event.before }}
+                  PR_LABELS: ${{ steps.pr.outputs.labels }}
+                  RELEASE_REQUESTED: ${{ inputs.release }}
+              run: node apps/desktop/scripts/release-info.mjs
+
+    package:
+        name: Package (${{ matrix.name }})
+        needs: prepare
+        runs-on: ${{ matrix.os }}
+        timeout-minutes: 45
+        strategy:
+            # Build every platform even when one fails, so each failure is reported on its own.
+            fail-fast: false
+            matrix:
+                include:
+                    - name: Windows
+                      platform: win
+                      os: windows-latest
+                      packages: |
+                          apps/desktop/release/HttpReq-Setup-*.exe
+                    - name: macOS
+                      platform: mac
+                      os: macos-latest
+                      packages: |
+                          apps/desktop/release/HttpReq-*.dmg
+                          apps/desktop/release/HttpReq-*.zip
+                    - name: Linux
+                      platform: linux
+                      os: ubuntu-latest
+                      packages: |
+                          apps/desktop/release/HttpReq-*.AppImage
+                          apps/desktop/release/httpreq_*.deb
         env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ steps.sha.outputs.sha }}
-        run: |
-          # The merged pull request whose merge (or squash) commit is this push; none for a direct
-          # push. A failed lookup only loses the label, never the version-change check.
-          labels=$(gh api "repos/$GITHUB_REPOSITORY/commits/$SHA/pulls" \
-            --jq "[.[] | select(.merged_at != null and .merge_commit_sha == \"$SHA\")][0].labels // [] | map(.name)" \
-            || { echo "::warning::Could not look up the pull request for $SHA."; echo '[]'; })
-          echo "labels=${labels:-[]}" >> "$GITHUB_OUTPUT"
+            # Keep Electron and electron-builder downloads (Electron zips, NSIS, fpm, AppImage tools) in
+            # one place per OS so they can be cached between runs.
+            ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
+            electron_config_cache: ${{ github.workspace }}/.cache/electron
+            ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
+        steps:
+            - uses: actions/checkout@v4
+              with:
+                  ref: ${{ needs.prepare.outputs.sha }}
+                  persist-credentials: false
 
-      - name: Check the version and decide whether this is a release
-        id: info
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.before }}
-          PR_LABELS: ${{ steps.pr.outputs.labels }}
-          RELEASE_REQUESTED: ${{ inputs.release }}
-        run: node apps/desktop/scripts/release-info.mjs
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 24
+                  cache: npm
 
-  package:
-    name: Package (${{ matrix.name }})
-    needs: prepare
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    strategy:
-      # Build every platform even when one fails, so each failure is reported on its own.
-      fail-fast: false
-      matrix:
-        include:
-          - name: Windows
-            platform: win
-            os: windows-latest
-            packages: |
-              apps/desktop/release/HttpReq-Setup-*.exe
-          - name: macOS
-            platform: mac
-            os: macos-latest
-            packages: |
-              apps/desktop/release/HttpReq-*.dmg
-              apps/desktop/release/HttpReq-*.zip
-          - name: Linux
-            platform: linux
-            os: ubuntu-latest
-            packages: |
-              apps/desktop/release/HttpReq-*.AppImage
-              apps/desktop/release/httpreq_*.deb
-    env:
-      # Keep Electron and electron-builder downloads (Electron zips, NSIS, fpm, AppImage tools) in
-      # one place per OS so they can be cached between runs.
-      ELECTRON_CACHE: ${{ github.workspace }}/.cache/electron
-      electron_config_cache: ${{ github.workspace }}/.cache/electron
-      ELECTRON_BUILDER_CACHE: ${{ github.workspace }}/.cache/electron-builder
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.prepare.outputs.sha }}
-          persist-credentials: false
+            - name: Cache Electron downloads
+              uses: actions/cache@v4
+              with:
+                  path: .cache
+                  key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+                  restore-keys: electron-${{ runner.os }}-
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
+            - name: Install dependencies
+              run: npm ci
 
-      - name: Cache Electron downloads
-        uses: actions/cache@v4
-        with:
-          path: .cache
-          key: electron-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: electron-${{ runner.os }}-
+            - name: Build and package
+              # Bash on every OS so the unset loop below works on Windows too.
+              shell: bash
+              # electron-builder treats a defined but empty CSC_LINK as a certificate path, resolves it
+              # to the project directory and fails with "not a file". Unset the empty ones so a missing
+              # secret builds an unsigned package instead.
+              run: |
+                  for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD CSC_LINK CSC_KEY_PASSWORD \
+                    APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+                    if [ -z "${!name}" ]; then unset "$name"; fi
+                  done
+                  npm run package:desktop
+              env:
+                  # Each platform only sees its own certificate; empty values are unset above.
+                  WIN_CSC_LINK: ${{ matrix.platform == 'win' && secrets.WIN_CSC_LINK || '' }}
+                  WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
+                  CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
+                  CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+                  CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK != '' }}
+                  APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
+                  APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+                  APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
 
-      - name: Install dependencies
-        run: npm ci
+            - name: Verify packages
+              run: node apps/desktop/scripts/verify-packages.mjs ${{ matrix.platform }}
 
-      - name: Build and package
-        # Bash on every OS so the unset loop below works on Windows too.
-        shell: bash
-        # electron-builder treats a defined but empty CSC_LINK as a certificate path, resolves it
-        # to the project directory and fails with "not a file". Unset the empty ones so a missing
-        # secret builds an unsigned package instead.
-        run: |
-          for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD CSC_LINK CSC_KEY_PASSWORD \
-            APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
-            if [ -z "${!name}" ]; then unset "$name"; fi
-          done
-          npm run package:desktop
-        env:
-          # Each platform only sees its own certificate; empty values are unset above.
-          WIN_CSC_LINK: ${{ matrix.platform == 'win' && secrets.WIN_CSC_LINK || '' }}
-          WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
-          CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
-          CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
-          CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK != '' }}
-          APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
-          APPLE_TEAM_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_TEAM_ID || '' }}
+            - name: Upload packages
+              uses: actions/upload-artifact@v4
+              with:
+                  name: HttpReq-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}
+                  path: |
+                      ${{ matrix.packages }}
+                      apps/desktop/release/SHA256SUMS-${{ matrix.platform }}.txt
+                  if-no-files-found: error
+                  # Installers are already compressed.
+                  compression-level: 0
+                  retention-days: 30
 
-      - name: Verify packages
-        run: node apps/desktop/scripts/verify-packages.mjs ${{ matrix.platform }}
+    release:
+        # A static name: GitHub does not evaluate expressions in the name of a skipped job, so
+        # `${{ needs.prepare.outputs.tag }}` showed up literally on every merge that is not a release.
+        # The published tag is written to the run summary instead.
+        name: Publish release
+        # Runs only when every platform succeeded (a failed or cancelled leg skips it).
+        needs: [prepare, package]
+        if: needs.prepare.outputs.release == 'true'
+        runs-on: ubuntu-latest
+        permissions:
+            contents: write
+        steps:
+            - name: Download packages
+              uses: actions/download-artifact@v4
+              with:
+                  pattern: HttpReq-${{ needs.prepare.outputs.version }}-*
+                  path: dist
+                  merge-multiple: true
 
-      - name: Upload packages
-        uses: actions/upload-artifact@v4
-        with:
-          name: HttpReq-${{ needs.prepare.outputs.version }}-${{ matrix.platform }}
-          path: |
-            ${{ matrix.packages }}
-            apps/desktop/release/SHA256SUMS-${{ matrix.platform }}.txt
-          if-no-files-found: error
-          # Installers are already compressed.
-          compression-level: 0
-          retention-days: 30
+            - name: Combine and check checksums
+              working-directory: dist
+              run: |
+                  cat SHA256SUMS-*.txt > SHA256SUMS.txt
+                  rm SHA256SUMS-*.txt
+                  sha256sum --check --strict SHA256SUMS.txt
+                  ls -l
 
-  release:
-    # A static name: GitHub does not evaluate expressions in the name of a skipped job, so
-    # `${{ needs.prepare.outputs.tag }}` showed up literally on every merge that is not a release.
-    # The published tag is written to the run summary instead.
-    name: Publish release
-    # Runs only when every platform succeeded (a failed or cancelled leg skips it).
-    needs: [prepare, package]
-    if: needs.prepare.outputs.release == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download packages
-        uses: actions/download-artifact@v4
-        with:
-          pattern: HttpReq-${{ needs.prepare.outputs.version }}-*
-          path: dist
-          merge-multiple: true
+            - name: Create the release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+                  GH_REPO: ${{ github.repository }}
+                  TAG: ${{ needs.prepare.outputs.tag }}
+                  VERSION: ${{ needs.prepare.outputs.version }}
+                  SHA: ${{ needs.prepare.outputs.sha }}
+                  PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
+              run: |
+                  flags=()
+                  if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
+                  # Upload everything to a draft first and publish it last, so users (and the app's update
+                  # check) never see a release whose assets are still uploading.
+                  gh release create "$TAG" dist/* --draft --target "$SHA" --title "HttpReq $VERSION" \
+                    --generate-notes "${flags[@]}"
+                  gh release edit "$TAG" --draft=false
+                  echo "Published [$TAG]($GITHUB_SERVER_URL/$GH_REPO/releases/tag/$TAG)." >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Combine and check checksums
-        working-directory: dist
-        run: |
-          cat SHA256SUMS-*.txt > SHA256SUMS.txt
-          rm SHA256SUMS-*.txt
-          sha256sum --check --strict SHA256SUMS.txt
-          ls -l
-
-      - name: Create the release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-          TAG: ${{ needs.prepare.outputs.tag }}
-          VERSION: ${{ needs.prepare.outputs.version }}
-          SHA: ${{ needs.prepare.outputs.sha }}
-          PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
-        run: |
-          flags=()
-          if [ "$PRERELEASE" = "true" ]; then flags+=(--prerelease); fi
-          # Upload everything to a draft first and publish it last, so users (and the app's update
-          # check) never see a release whose assets are still uploading.
-          gh release create "$TAG" dist/* --draft --target "$SHA" --title "HttpReq $VERSION" \
-            --generate-notes "${flags[@]}"
-          gh release edit "$TAG" --draft=false
-          echo "Published [$TAG]($GITHUB_SERVER_URL/$GH_REPO/releases/tag/$TAG)." >> "$GITHUB_STEP_SUMMARY"
-
-  report:
-    name: Report
-    needs: [prepare, package, release]
-    if: always()
-    runs-on: ubuntu-latest
-    steps:
-      - name: Summarize
-        env:
-          PREPARE: ${{ needs.prepare.result }}
-          PACKAGE: ${{ needs.package.result }}
-          RELEASE: ${{ needs.release.result }}
-          IS_RELEASE: ${{ needs.prepare.outputs.release }}
-          TAG: ${{ needs.prepare.outputs.tag }}
-          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-        run: |
-          {
-            echo "### Desktop packages"
-            echo
-            echo "| Step | Result |"
-            echo "| --- | --- |"
-            echo "| Version check | $PREPARE |"
-            echo "| Packages (all platforms) | $PACKAGE |"
-            echo "| Release $TAG | $([ "$IS_RELEASE" = "true" ] && echo "$RELEASE" || echo "not a release") |"
-            echo
-            echo "Download the installers from the **Artifacts** section of [this run]($RUN_URL)."
-          } >> "$GITHUB_STEP_SUMMARY"
-          if [ "$PREPARE" != "success" ] || [ "$PACKAGE" != "success" ]; then
-            echo "::error::Packaging failed; see the failed job above. No release was published."
-            exit 1
-          fi
-          if [ "$IS_RELEASE" = "true" ] && [ "$RELEASE" != "success" ]; then
-            echo "::error::The packages built, but publishing release $TAG failed."
-            exit 1
-          fi
+    report:
+        name: Report
+        needs: [prepare, package, release]
+        if: always()
+        runs-on: ubuntu-latest
+        steps:
+            - name: Summarize
+              env:
+                  PREPARE: ${{ needs.prepare.result }}
+                  PACKAGE: ${{ needs.package.result }}
+                  RELEASE: ${{ needs.release.result }}
+                  IS_RELEASE: ${{ needs.prepare.outputs.release }}
+                  TAG: ${{ needs.prepare.outputs.tag }}
+                  RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+              run: |
+                  {
+                    echo "### Desktop packages"
+                    echo
+                    echo "| Step | Result |"
+                    echo "| --- | --- |"
+                    echo "| Version check | $PREPARE |"
+                    echo "| Packages (all platforms) | $PACKAGE |"
+                    echo "| Release $TAG | $([ "$IS_RELEASE" = "true" ] && echo "$RELEASE" || echo "not a release") |"
+                    echo
+                    echo "Download the installers from the **Artifacts** section of [this run]($RUN_URL)."
+                  } >> "$GITHUB_STEP_SUMMARY"
+                  if [ "$PREPARE" != "success" ] || [ "$PACKAGE" != "success" ]; then
+                    echo "::error::Packaging failed; see the failed job above. No release was published."
+                    exit 1
+                  fi
+                  if [ "$IS_RELEASE" = "true" ] && [ "$RELEASE" != "success" ]; then
+                    echo "::error::The packages built, but publishing release $TAG failed."
+                    exit 1
+                  fi

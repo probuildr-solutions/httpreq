@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
 import { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
@@ -9,13 +14,13 @@ import 'monaco-editor/esm/vs/basic-languages/xml/xml.contribution';
 import 'monaco-editor/esm/vs/basic-languages/html/html.contribution';
 
 (
-  globalThis as typeof globalThis & {
-    MonacoEnvironment?: { getWorker(moduleId: string, label: string): Worker };
-  }
+    globalThis as typeof globalThis & {
+        MonacoEnvironment?: { getWorker(moduleId: string, label: string): Worker };
+    }
 ).MonacoEnvironment = {
-  getWorker(_moduleId: string, label: string) {
-    return label === 'json' ? new JsonWorker() : new EditorWorker();
-  },
+    getWorker(_moduleId: string, label: string) {
+        return label === 'json' ? new JsonWorker() : new EditorWorker();
+    },
 };
 
 loader.config({ monaco });
@@ -23,10 +28,10 @@ loader.config({ monaco });
 // Monaco measures glyph widths once. The bundled monospace web font may finish loading after the
 // first editor mounts, so re-measure when it arrives to keep the cursor aligned with the text.
 if (typeof document !== 'undefined' && 'fonts' in document) {
-  void document.fonts
-    .load("13px 'JetBrains Mono'")
-    .then(() => monaco.editor.remeasureFonts())
-    .catch(() => undefined);
+    void document.fonts
+        .load("13px 'JetBrains Mono'")
+        .then(() => monaco.editor.remeasureFonts())
+        .catch(() => undefined);
 }
 
 /**
@@ -34,15 +39,15 @@ if (typeof document !== 'undefined' && 'fonts' in document) {
  * services, themes and font measurements, which is the slowest part of showing any editor.
  */
 export const warmUp = () => {
-  if (typeof document === 'undefined') return;
-  const host = document.createElement('div');
-  host.style.cssText =
-    'position:fixed;left:-10000px;top:0;width:200px;height:100px;visibility:hidden';
-  document.body.append(host);
-  try {
-    const instance = monaco.editor.create(host, { value: '{}', language: 'json' });
-    instance.dispose();
-  } finally {
-    host.remove();
-  }
+    if (typeof document === 'undefined') return;
+    const host = document.createElement('div');
+    host.style.cssText =
+        'position:fixed;left:-10000px;top:0;width:200px;height:100px;visibility:hidden';
+    document.body.append(host);
+    try {
+        const instance = monaco.editor.create(host, { value: '{}', language: 'json' });
+        instance.dispose();
+    } finally {
+        host.remove();
+    }
 };

@@ -22,7 +22,7 @@ apps/
   web/             Vite renderer and browser entry point
   desktop/         Hardened Electron main process and preload bridge
 packages/
-  ui/              Mantine workbench, theme, and Zustand state
+  ui/              Tailwind component kit, workbench, and Zustand state
   api-client/      HTTP and WebSocket preparation, browser/Electron adapters
   workspace/       Workspace model helpers, migration, and tree operations
   storage/         Key/value store abstraction and the workspace repositories
@@ -32,7 +32,10 @@ packages/
 The desktop-only code lives in `apps/desktop/src`: `websocket.ts` (sockets that can set handshake
 headers) and `ssh/` (connections, credential vault, known hosts, terminal sessions, tunnels).
 
-See [docs/architecture.md](docs/architecture.md) for boundaries and security decisions.
+See [docs/architecture.md](docs/architecture.md) for boundaries and security decisions,
+[docs/ui.md](docs/ui.md) for the Tailwind design system and component kit, and
+[docs/security.md](docs/security.md) for how the packaged desktop app resists inspection and
+tampering.
 
 ## Run
 

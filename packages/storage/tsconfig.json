@@ -1,21 +1,21 @@
 {
-  "extends": "../../tsconfig.base.json",
-  "compilerOptions": {
-    "composite": true,
-    "declaration": true,
-    "emitDeclarationOnly": true,
-    "outDir": "dist-types"
-  },
-  "include": ["src"],
-  "references": [
-    {
-      "path": "../shared"
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "composite": true,
+        "declaration": true,
+        "emitDeclarationOnly": true,
+        "outDir": "dist-types"
     },
-    {
-      "path": "../workspace"
-    },
-    {
-      "path": "../api-client"
-    }
-  ]
+    "include": ["src"],
+    "references": [
+        {
+            "path": "../shared"
+        },
+        {
+            "path": "../workspace"
+        },
+        {
+            "path": "../api-client"
+        }
+    ]
 }

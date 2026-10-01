@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
 // @vitest-environment node
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -12,22 +17,22 @@ import { describe, expect, it } from 'vitest';
  */
 const root = fileURLToPath(new URL('../../..', import.meta.url));
 const versionOf = (path: string) =>
-  (JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) as { version: string }).version;
+    (JSON.parse(readFileSync(join(path, 'package.json'), 'utf8')) as { version: string }).version;
 
 describe('application version', () => {
-  it('is the same in every workspace', () => {
-    const expected = versionOf(root);
-    expect(expected).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?$/);
-    for (const group of ['apps', 'packages']) {
-      for (const name of readdirSync(join(root, group))) {
-        expect({
-          workspace: `${group}/${name}`,
-          version: versionOf(join(root, group, name)),
-        }).toEqual({
-          workspace: `${group}/${name}`,
-          version: expected,
-        });
-      }
-    }
-  });
+    it('is the same in every workspace', () => {
+        const expected = versionOf(root);
+        expect(expected).toMatch(/^\d+\.\d+\.\d+(-[\w.]+)?$/);
+        for (const group of ['apps', 'packages']) {
+            for (const name of readdirSync(join(root, group))) {
+                expect({
+                    workspace: `${group}/${name}`,
+                    version: versionOf(join(root, group, name)),
+                }).toEqual({
+                    workspace: `${group}/${name}`,
+                    version: expected,
+                });
+            }
+        }
+    });
 });

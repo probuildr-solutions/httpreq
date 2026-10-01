@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
 /** Application version from the root package.json, injected by Vite at build time. */
 declare const __APP_VERSION__: string;
 

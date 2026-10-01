@@ -1,0 +1,424 @@
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ *
+ * The design system: Tailwind's engine plus the application's tokens.
+ * Components never pick a raw colour. They use the semantic tokens below (`bg-surface`,
+ * `text-dimmed`, `border-line`…), which a single `data-theme` attribute on <html> re-points for
+ * dark mode. Switching theme therefore never needs `dark:` variants in component code, and a new
+ * colour scheme is a change to this file alone.
+ */
+@import 'tailwindcss';
+@import '@fontsource/poppins/400.css';
+@import '@fontsource/poppins/500.css';
+@import '@fontsource/poppins/600.css';
+@import '@fontsource/poppins/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/700.css';
+
+/* Pages that render the UI package scan its sources for class names. */
+@source '.';
+
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+/* Palette and light-mode semantic tokens. `static` keeps every variable available to var(). */
+@theme static {
+    --font-sans:
+        Poppins, 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial,
+        sans-serif;
+    --font-mono:
+        'JetBrains Mono', 'Cascadia Code', 'SF Mono', SFMono-Regular, Menlo, Consolas,
+        'Liberation Mono', monospace;
+
+    /* Poppins runs wide, so the desktop scale is a notch more compact than Tailwind's. */
+    --text-2xs: 0.6875rem;
+    --text-xs: 0.71875rem;
+    --text-sm: 0.8125rem;
+    --text-base: 0.875rem;
+    --text-lg: 1rem;
+    --text-xl: 1.125rem;
+
+    --radius-xs: 0.125rem;
+    --radius-sm: 0.25rem;
+    --radius-md: 0.5rem;
+
+    --color-gray-0: #f8f9fa;
+    --color-gray-1: #f1f3f5;
+    --color-gray-2: #e9ecef;
+    --color-gray-3: #dee2e6;
+    --color-gray-4: #ced4da;
+    --color-gray-5: #adb5bd;
+    --color-gray-6: #868e96;
+    --color-gray-7: #495057;
+    --color-gray-8: #343a40;
+    --color-gray-9: #212529;
+
+    --color-dark-0: #c9c9c9;
+    --color-dark-1: #b8b8b8;
+    --color-dark-2: #828282;
+    --color-dark-3: #696969;
+    --color-dark-4: #424242;
+    --color-dark-5: #3b3b3b;
+    --color-dark-6: #2e2e2e;
+    --color-dark-7: #242424;
+    --color-dark-8: #1f1f1f;
+    --color-dark-9: #141414;
+
+    --color-violet-0: #f3f0ff;
+    --color-violet-1: #e5dbff;
+    --color-violet-2: #d0bfff;
+    --color-violet-3: #b197fc;
+    --color-violet-4: #9775fa;
+    --color-violet-5: #845ef7;
+    --color-violet-6: #7950f2;
+    --color-violet-7: #7048e8;
+    --color-violet-8: #6741d9;
+    --color-violet-9: #5f3dc4;
+
+    --color-red-0: #fff5f5;
+    --color-red-1: #ffe3e3;
+    --color-red-2: #ffc9c9;
+    --color-red-3: #ffa8a8;
+    --color-red-4: #ff8787;
+    --color-red-5: #ff6b6b;
+    --color-red-6: #fa5252;
+    --color-red-7: #f03e3e;
+    --color-red-8: #e03131;
+    --color-red-9: #c92a2a;
+
+    --color-yellow-0: #fff9db;
+    --color-yellow-1: #fff3bf;
+    --color-yellow-2: #ffec99;
+    --color-yellow-3: #ffe066;
+    --color-yellow-4: #ffd43b;
+    --color-yellow-5: #fcc419;
+    --color-yellow-6: #fab005;
+    --color-yellow-7: #f59f00;
+    --color-yellow-8: #f08c00;
+    --color-yellow-9: #e67700;
+
+    --color-teal-0: #e6fcf5;
+    --color-teal-1: #c3fae8;
+    --color-teal-2: #96f2d7;
+    --color-teal-3: #63e6be;
+    --color-teal-4: #38d9a9;
+    --color-teal-5: #20c997;
+    --color-teal-6: #12b886;
+    --color-teal-7: #0ca678;
+    --color-teal-8: #099268;
+    --color-teal-9: #087f5b;
+
+    --color-blue-0: #e7f5ff;
+    --color-blue-1: #d0ebff;
+    --color-blue-2: #a5d8ff;
+    --color-blue-3: #74c0fc;
+    --color-blue-4: #4dabf7;
+    --color-blue-5: #339af0;
+    --color-blue-6: #228be6;
+    --color-blue-7: #1c7ed6;
+    --color-blue-8: #1971c2;
+    --color-blue-9: #1864ab;
+
+    --color-orange-8: #e8590c;
+
+    --color-cyan-5: #22b8cf;
+
+    /* Surfaces and text. */
+    --color-surface: #ffffff;
+    --color-field: #ffffff;
+    --color-fg: #000000;
+    --color-dimmed: var(--color-gray-6);
+    --color-placeholder: var(--color-gray-5);
+    --color-line: var(--color-gray-4);
+    --color-line-strong: var(--color-gray-4);
+    --color-line-stronger: var(--color-gray-5);
+    --color-hover: var(--color-gray-0);
+    --color-pressed: var(--color-gray-1);
+    --color-overlay: rgb(0 0 0 / 0.55);
+
+    /* Application chrome: title bar, tab strip, sidebar headers, status bar. */
+    --color-chrome: var(--color-gray-1);
+    --color-titlebar: var(--color-gray-1);
+    --color-titlebar-fg: var(--color-gray-8);
+    --color-statusbar: var(--color-gray-1);
+    --color-tab-hover: var(--color-gray-0);
+    --color-chrome-hover: rgb(0 0 0 / 0.07);
+    --color-chrome-pressed: rgb(0 0 0 / 0.11);
+    --color-chrome-close-hover: rgb(0 0 0 / 0.09);
+
+    /* The accent. `primary-soft` is the tinted background of selected rows and light badges. */
+    --color-primary: var(--color-violet-6);
+    --color-primary-hover: var(--color-violet-7);
+    --color-primary-fg: #ffffff;
+    --color-primary-soft: rgb(121 80 242 / 0.1);
+    --color-primary-soft-hover: rgb(121 80 242 / 0.14);
+    --color-primary-text: var(--color-violet-6);
+
+    /* Per-tone tokens: filled button, tinted background and readable text. */
+    --color-danger: var(--color-red-6);
+    --color-danger-hover: var(--color-red-7);
+    --color-danger-soft: rgb(250 82 82 / 0.1);
+    --color-danger-text: var(--color-red-6);
+    --color-warning: var(--color-yellow-6);
+    --color-warning-hover: var(--color-yellow-7);
+    --color-warning-soft: rgb(250 176 5 / 0.12);
+    --color-warning-text: var(--color-yellow-9);
+    --color-success: var(--color-teal-6);
+    --color-success-hover: var(--color-teal-7);
+    --color-success-soft: rgb(18 184 134 / 0.12);
+    --color-success-text: var(--color-teal-8);
+    --color-info: var(--color-blue-6);
+    --color-info-hover: var(--color-blue-7);
+    --color-info-soft: rgb(34 139 230 / 0.1);
+    --color-info-text: var(--color-blue-7);
+    --color-neutral: var(--color-gray-6);
+    --color-neutral-hover: var(--color-gray-7);
+    --color-neutral-soft: rgb(134 142 150 / 0.14);
+    --color-neutral-text: var(--color-gray-7);
+
+    /* `{{variable}}` chips inside fields: defined ones in the accent, undefined ones in red. */
+    --color-var-fg: var(--color-violet-8);
+    --color-var-bg: var(--color-violet-0);
+    --color-var-ring: var(--color-violet-2);
+    --color-var-missing-fg: var(--color-red-8);
+    --color-var-missing-bg: var(--color-red-0);
+    --color-var-missing-ring: var(--color-red-2);
+    --color-selection: rgb(121 80 242 / 0.25);
+
+    /* HTTP verbs: one readable hue each, so a method is recognisable at a glance. */
+    --color-method-get: var(--color-teal-7);
+    --color-method-post: var(--color-blue-7);
+    --color-method-put: var(--color-yellow-9);
+    --color-method-patch: var(--color-orange-8);
+    --color-method-delete: var(--color-red-7);
+    --color-method-head: #ae3ec9;
+    --color-method-options: var(--color-gray-6);
+
+    --shadow-popup: 0 4px 16px rgb(0 0 0 / 0.16), 0 1px 3px rgb(0 0 0 / 0.1);
+
+    --animate-spin: spin 0.8s linear infinite;
+    --animate-pop: pop 0.12s ease-out;
+    --animate-fade: fade 0.12s ease-out;
+    --animate-pulse-soft: pulse-soft 1.4s ease-in-out infinite;
+
+    @keyframes pop {
+        from {
+            opacity: 0;
+            transform: scale(0.97);
+        }
+    }
+    @keyframes fade {
+        from {
+            opacity: 0;
+        }
+    }
+    @keyframes pulse-soft {
+        50% {
+            opacity: 0.45;
+        }
+    }
+}
+
+/* Dark mode re-points the semantic tokens; the palette itself never changes. */
+:root[data-theme='dark'] {
+    color-scheme: dark;
+    --color-surface: var(--color-dark-7);
+    --color-field: var(--color-dark-6);
+    --color-fg: var(--color-dark-0);
+    --color-dimmed: var(--color-dark-2);
+    --color-placeholder: var(--color-dark-3);
+    --color-line: var(--color-dark-4);
+    --color-line-strong: var(--color-dark-3);
+    --color-line-stronger: var(--color-dark-2);
+    --color-hover: var(--color-dark-6);
+    --color-pressed: var(--color-dark-5);
+
+    --color-chrome: var(--color-dark-8);
+    --color-titlebar: var(--color-dark-9);
+    --color-titlebar-fg: var(--color-dark-0);
+    --color-statusbar: var(--color-dark-9);
+    --color-tab-hover: var(--color-dark-6);
+    --color-chrome-hover: rgb(255 255 255 / 0.08);
+    --color-chrome-pressed: rgb(255 255 255 / 0.13);
+    --color-chrome-close-hover: rgb(255 255 255 / 0.12);
+
+    --color-primary: var(--color-violet-5);
+    --color-primary-hover: var(--color-violet-6);
+    --color-primary-soft: rgb(132 94 247 / 0.16);
+    --color-primary-soft-hover: rgb(132 94 247 / 0.22);
+    --color-primary-text: var(--color-violet-3);
+
+    --color-danger: var(--color-red-8);
+    --color-danger-hover: var(--color-red-9);
+    --color-danger-soft: rgb(250 82 82 / 0.16);
+    --color-danger-text: var(--color-red-4);
+    --color-warning: var(--color-yellow-8);
+    --color-warning-hover: var(--color-yellow-9);
+    --color-warning-soft: rgb(250 176 5 / 0.16);
+    --color-warning-text: var(--color-yellow-4);
+    --color-success: var(--color-teal-8);
+    --color-success-hover: var(--color-teal-9);
+    --color-success-soft: rgb(18 184 134 / 0.16);
+    --color-success-text: var(--color-teal-4);
+    --color-info: var(--color-blue-8);
+    --color-info-hover: var(--color-blue-9);
+    --color-info-soft: rgb(34 139 230 / 0.16);
+    --color-info-text: var(--color-blue-3);
+    --color-neutral: var(--color-dark-4);
+    --color-neutral-hover: var(--color-dark-3);
+    --color-neutral-soft: rgb(130 130 130 / 0.2);
+    --color-neutral-text: var(--color-dark-1);
+
+    --color-method-get: var(--color-teal-4);
+    --color-method-post: var(--color-blue-4);
+    --color-method-put: var(--color-yellow-4);
+    --color-method-patch: #ff922b;
+    --color-method-delete: var(--color-red-4);
+    --color-method-head: #e599f7;
+    --color-method-options: var(--color-dark-1);
+
+    --color-var-fg: var(--color-violet-3);
+    --color-var-bg: rgb(151 117 250 / 0.18);
+    --color-var-ring: rgb(151 117 250 / 0.3);
+    --color-var-missing-fg: var(--color-red-3);
+    --color-var-missing-bg: rgb(250 82 82 / 0.15);
+    --color-var-missing-ring: rgb(250 82 82 / 0.3);
+    --color-selection: rgb(151 117 250 / 0.35);
+
+    --color-overlay: rgb(0 0 0 / 0.7);
+    --shadow-popup: 0 4px 16px rgb(0 0 0 / 0.5), 0 1px 3px rgb(0 0 0 / 0.4);
+}
+
+@layer base {
+    :root {
+        /* The request tab strip and every sidebar view header, rule included. */
+        --hr-strip-height: 34px;
+    }
+
+    html {
+        background: var(--color-surface);
+        color: var(--color-fg);
+        font-family: var(--font-sans);
+        line-height: 1.55;
+        -webkit-font-smoothing: antialiased;
+    }
+
+    /* The root stays 16px so every rem-based size in the design is the size it was drawn at. */
+    body {
+        font-size: 0.875rem;
+    }
+
+    /* The border colour every component expects, instead of Tailwind's `currentcolor`. */
+    *,
+    ::before,
+    ::after {
+        border-color: var(--color-line);
+    }
+
+    button {
+        cursor: pointer;
+    }
+
+    button:disabled {
+        cursor: default;
+    }
+
+    ::placeholder {
+        color: var(--color-placeholder);
+        opacity: 1;
+    }
+
+    /* Compact, theme-aware scrollbars in the style of desktop editors. */
+    * {
+        scrollbar-width: thin;
+        scrollbar-color: light-dark(rgb(0 0 0 / 0.25), rgb(255 255 255 / 0.22)) transparent;
+    }
+
+    :focus-visible {
+        outline: 2px solid var(--color-primary);
+        outline-offset: 1px;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+    }
+}
+
+@layer utilities {
+    /* Code-oriented text keeps a monospace face; the rest of the UI uses Poppins. */
+    .hr-mono,
+    .hr-mono input,
+    .hr-mono textarea {
+        font-family: var(--font-mono);
+        font-size: 12.5px;
+    }
+
+    /* Hides the scrollbar of a horizontally scrolling strip while keeping it scrollable. */
+    .no-scrollbar {
+        scrollbar-width: none;
+    }
+    .no-scrollbar::-webkit-scrollbar {
+        display: none;
+    }
+}
+
+/*
+ * In Electron the title bar drags the window (double-click maximises natively); every interactive
+ * element inside it opts out so it stays clickable.
+ */
+@utility app-drag-region {
+    -webkit-app-region: drag;
+    & :is(button, a, input, [role='menubar'], [role='menu']) {
+        -webkit-app-region: no-drag;
+    }
+}
+
+/* The 2px accent line drawn in the middle of a 6px drag handle. */
+@utility resize-line {
+    background: linear-gradient(
+        to right,
+        transparent 2px,
+        var(--color-primary) 2px,
+        var(--color-primary) 4px,
+        transparent 4px
+    );
+}
+
+@utility app-no-drag {
+    -webkit-app-region: no-drag;
+}
+
+/* While a panel edge is dragged, the resize cursor and no text selection apply to the whole page. */
+body[data-resizing='col'] {
+    cursor: col-resize;
+    user-select: none;
+}
+
+/* Matches of the response search inside rendered text, such as a stream's events. */
+mark[data-find] {
+    border-radius: 2px;
+    background: rgb(245 159 0 / 0.35);
+    color: inherit;
+}
+
+mark[data-find][data-current] {
+    background: rgb(245 159 0 / 0.8);
+    outline: 1px solid #f59f00;
+}
+
+/* Matches of the response search in the Monaco viewer (see ResponseViewer). */
+.hr-find-match {
+    background: rgb(245 159 0 / 0.3);
+    border-radius: 2px;
+}
+
+.hr-find-current {
+    background: rgb(245 159 0 / 0.75);
+    outline: 1px solid #f59f00;
+    border-radius: 2px;
+}
