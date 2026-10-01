@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
 import type { HistoryRepository, WorkspaceRepository } from '@httpreq/shared';
 import { KeyValueHistoryRepository, KeyValueWorkspaceRepository } from './repository';
 import { createBrowserStore, WebStorageStore, type KeyValueStore } from './store';
@@ -23,29 +28,29 @@ const LEGACY_PATTERN = /^(workspace|drafts|history)\./;
  * Returns the number of keys copied.
  */
 export const migrateLegacyStorage = async (
-  target: KeyValueStore,
-  storage: Storage | undefined = globalThis.localStorage,
+    target: KeyValueStore,
+    storage: Storage | undefined = globalThis.localStorage,
 ): Promise<number> => {
-  if (!storage) return 0;
-  let legacy: WebStorageStore;
-  let keys: string[];
-  try {
-    legacy = new WebStorageStore(storage, LEGACY_PREFIX);
-    keys = (await legacy.keys()).filter((key) => LEGACY_PATTERN.test(key));
-  } catch {
-    return 0;
-  }
-  if (!keys.length) return 0;
-  const existing = new Set(await target.keys());
-  let copied = 0;
-  for (const key of keys) {
-    if (existing.has(key)) continue;
-    const value = await legacy.get(key);
-    if (value === null) continue;
-    await target.set(key, value);
-    copied += 1;
-  }
-  return copied;
+    if (!storage) return 0;
+    let legacy: WebStorageStore;
+    let keys: string[];
+    try {
+        legacy = new WebStorageStore(storage, LEGACY_PREFIX);
+        keys = (await legacy.keys()).filter((key) => LEGACY_PATTERN.test(key));
+    } catch {
+        return 0;
+    }
+    if (!keys.length) return 0;
+    const existing = new Set(await target.keys());
+    let copied = 0;
+    for (const key of keys) {
+        if (existing.has(key)) continue;
+        const value = await legacy.get(key);
+        if (value === null) continue;
+        await target.set(key, value);
+        copied += 1;
+    }
+    return copied;
 };
 
 /**
@@ -54,18 +59,18 @@ export const migrateLegacyStorage = async (
  * starts even when site data is blocked.
  */
 export const createBrowserStorage = async (): Promise<{
-  store: KeyValueStore;
-  repository: WorkspaceRepository;
-  history: HistoryRepository;
+    store: KeyValueStore;
+    repository: WorkspaceRepository;
+    history: HistoryRepository;
 }> => {
-  const store = await createBrowserStore();
-  // A failed migration must not stop the app: the worst case is an empty first workspace.
-  await migrateLegacyStorage(store).catch(() => 0);
-  return {
-    store,
-    repository: new KeyValueWorkspaceRepository(store),
-    history: new KeyValueHistoryRepository(store),
-  };
+    const store = await createBrowserStore();
+    // A failed migration must not stop the app: the worst case is an empty first workspace.
+    await migrateLegacyStorage(store).catch(() => 0);
+    return {
+        store,
+        repository: new KeyValueWorkspaceRepository(store),
+        history: new KeyValueHistoryRepository(store),
+    };
 };
 
 /**
@@ -73,13 +78,13 @@ export const createBrowserStorage = async (): Promise<{
  * existed. Kept for tests and for runtimes without IndexedDB.
  */
 export class LocalWorkspaceRepository extends KeyValueWorkspaceRepository {
-  constructor(storage: Storage = localStorage) {
-    super(new WebStorageStore(storage, LEGACY_PREFIX));
-  }
+    constructor(storage: Storage = localStorage) {
+        super(new WebStorageStore(storage, LEGACY_PREFIX));
+    }
 }
 
 export class LocalHistoryRepository extends KeyValueHistoryRepository {
-  constructor(storage: Storage = localStorage, limit?: number) {
-    super(new WebStorageStore(storage, LEGACY_PREFIX), limit);
-  }
+    constructor(storage: Storage = localStorage, limit?: number) {
+        super(new WebStorageStore(storage, LEGACY_PREFIX), limit);
+    }
 }

@@ -21,7 +21,7 @@ in the Vite dev build (web) and the production build (Electron).
 
 1. **Rendering, not storage, made typing slow.** Every explorer row was memoized, but received
    about 15 fresh closures on each render, so every row re-rendered on every keystroke. Each row
-   has a Mantine menu and tooltips. On top of that, the application shell subscribed to all
+   has its own actions menu and tooltips. On top of that, the application shell subscribed to all
    drafts, responses and socket states, so it also re-rendered the whole shell for every keystroke
    and every WebSocket message. Building the tree rows was O(containers × requests).
 2. **Every write was the whole workspace.** Each structural change (opening a tab, renaming,
@@ -39,14 +39,14 @@ in the Vite dev build (web) and the production build (Electron).
 - **Store.** `editRequest` compares with a structural `deepEqual` instead of serializing both
   requests.
 - **Storage.** A workspace is stored split into two parts:
-  - `workspace.<id>` is the shell: tree containers, environments, profiles, tab order, and the
-    request ids in tree order.
-  - `request.<id>.<requestId>` and `websocket.<id>.<socketId>` hold one request each.
+    - `workspace.<id>` is the shell: tree containers, environments, profiles, tab order, and the
+      request ids in tree order.
+    - `request.<id>.<requestId>` and `websocket.<id>.<socketId>` hold one request each.
 
-  A save writes the shell plus only the requests whose object identity changed since the last
-  write or load. The store updates immutably, so identity is a reliable change signal. Shell,
-  request writes and deletions go into one IndexedDB transaction, so the write is atomic. The JSON
-  round trip only runs as a fallback when a value can't be structured-cloned.
+    A save writes the shell plus only the requests whose object identity changed since the last
+    write or load. The store updates immutably, so identity is a reliable change signal. Shell,
+    request writes and deletions go into one IndexedDB transaction, so the write is atomic. The JSON
+    round trip only runs as a fallback when a value can't be structured-cloned.
 
 - **Responses.** JSON bodies of 256 KB and up are formatted in a Web Worker. Wrapping and folding
   are off from 2 MB. Highlighting is off from 16 MB.
@@ -67,14 +67,14 @@ and re-import.
   upgrades, ports, and its own credentials. It would also add an IPC/HTTP hop to every read, and
   it can't run in the web build at all. Nothing measured calls for it.
 - **SQLite on desktop is the right next step if a need appears,** for example:
-  - full-text search across very large histories,
-  - queries over tens of thousands of requests without loading them,
-  - sharing one data file between processes.
+    - full-text search across very large histories,
+    - queries over tens of thousands of requests without loading them,
+    - sharing one data file between processes.
 
-  In that case, implement `KeyValueStore` (or a richer repository) over `better-sqlite3` in the
-  Electron main process, behind the existing repository interface. The UI would not change.
-  Migration would read every `workspace.*`, `request.*`, `drafts.*` and `history.*` key from
-  IndexedDB once and write them in one transaction.
+    In that case, implement `KeyValueStore` (or a richer repository) over `better-sqlite3` in the
+    Electron main process, behind the existing repository interface. The UI would not change.
+    Migration would read every `workspace.*`, `request.*`, `drafts.*` and `history.*` key from
+    IndexedDB once and write them in one transaction.
 
 ## Security
 

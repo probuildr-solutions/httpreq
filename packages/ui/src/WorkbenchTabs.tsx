@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
 import { useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import type { HttpMethod } from '@httpreq/shared';
@@ -6,8 +11,8 @@ import { RequestTabs, type RequestTabsProps, type TabItem } from './RequestTabs'
 import { useWorkbenchStore } from './store';
 
 type Props = Omit<RequestTabsProps, 'requests' | 'unsavedIds'> & {
-  /** The open tabs as saved: names, kinds and saved methods. */
-  tabs: TabItem[];
+    /** The open tabs as saved: names, kinds and saved methods. */
+    tabs: TabItem[];
 };
 
 /**
@@ -19,34 +24,34 @@ type Props = Omit<RequestTabsProps, 'requests' | 'unsavedIds'> & {
  * sidebar, the editor and the response pane as well, once per keystroke and once per message.
  */
 export function WorkbenchTabs({ tabs, ...props }: Props) {
-  const ids = useMemo(() => tabs.map((tab) => tab.id), [tabs]);
-  const drafted = useWorkbenchStore(
-    useShallow((state) =>
-      ids.flatMap((id): (string | undefined)[] => {
-        const draft = state.drafts[id];
-        return [draft?.method, draft?.url];
-      }),
-    ),
-  );
-  const unsavedIds = useWorkbenchStore(useShallow((state) => Object.keys(state.drafts)));
-  const socketStatus = useConnectionsStore(
-    useShallow((state) => ids.map((id) => state.sockets[id]?.status ?? 'disconnected')),
-  );
+    const ids = useMemo(() => tabs.map((tab) => tab.id), [tabs]);
+    const drafted = useWorkbenchStore(
+        useShallow((state) =>
+            ids.flatMap((id): (string | undefined)[] => {
+                const draft = state.drafts[id];
+                return [draft?.method, draft?.url];
+            }),
+        ),
+    );
+    const unsavedIds = useWorkbenchStore(useShallow((state) => Object.keys(state.drafts)));
+    const socketStatus = useConnectionsStore(
+        useShallow((state) => ids.map((id) => state.sockets[id]?.status ?? 'disconnected')),
+    );
 
-  const unsaved = useMemo(() => new Set(unsavedIds), [unsavedIds]);
-  const decorated = useMemo(
-    () =>
-      tabs.map((tab, index): TabItem => {
-        if (tab.kind === 'request') {
-          const method = drafted[index * 2] as HttpMethod | undefined;
-          const url = drafted[index * 2 + 1];
-          return method === undefined ? tab : { ...tab, method, url };
-        }
-        if (tab.kind === 'websocket') return { ...tab, status: socketStatus[index] };
-        return tab;
-      }),
-    [tabs, drafted, socketStatus],
-  );
+    const unsaved = useMemo(() => new Set(unsavedIds), [unsavedIds]);
+    const decorated = useMemo(
+        () =>
+            tabs.map((tab, index): TabItem => {
+                if (tab.kind === 'request') {
+                    const method = drafted[index * 2] as HttpMethod | undefined;
+                    const url = drafted[index * 2 + 1];
+                    return method === undefined ? tab : { ...tab, method, url };
+                }
+                if (tab.kind === 'websocket') return { ...tab, status: socketStatus[index] };
+                return tab;
+            }),
+        [tabs, drafted, socketStatus],
+    );
 
-  return <RequestTabs requests={decorated} unsavedIds={unsaved} {...props} />;
+    return <RequestTabs requests={decorated} unsavedIds={unsaved} {...props} />;
 }

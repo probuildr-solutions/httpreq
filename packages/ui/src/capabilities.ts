@@ -1,3 +1,8 @@
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ */
+
 import { createContext, useContext } from 'react';
 import { WEB_CAPABILITIES, type PlatformCapabilities } from '@httpreq/shared';
 

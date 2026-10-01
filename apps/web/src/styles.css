@@ -1,14 +1,19 @@
-html,
-body,
-#root {
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  overflow: hidden;
-}
-* {
-  box-sizing: border-box;
-}
-body {
-  font-size: 14px;
+/*
+ * Copyright (c) 2026 Yamatri Reddy
+ * SPDX-License-Identifier: GPL-3.0-only
+ *
+ * The page entry stylesheet: the design system (Tailwind plus the application tokens) and the
+ * rules that make the document fill the window. Everything else is utility classes in components.
+ */
+@import '../../../packages/ui/src/tailwind.css';
+
+@layer base {
+    html,
+    body,
+    #root {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+    }
 }
