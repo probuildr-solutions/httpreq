@@ -55,6 +55,13 @@ export interface KeyValueTableProps<T extends KeyValueItem> {
     valuePlaceholder?: string;
     /** Suggestions for the key column (e.g. common header names). */
     keySuggestions?: readonly string[];
+    /**
+     * Likely keys, offered in the key cell as it is used. Unlike `keySuggestions` this keeps the
+     * cell a variable-aware field (`{{name}}` highlighting and completion).
+     */
+    keyHints?: readonly string[];
+    /** Likely values for a row, by its key (a header's usual values), offered in the value cell. */
+    valueSuggestions?: (key: string) => readonly string[];
     /** Shows a per-row toggle that masks the value. */
     allowSecret?: boolean;
     showDescription?: boolean;
@@ -136,6 +143,8 @@ function KeyValueTableInner<T extends KeyValueItem>({
     keyPlaceholder = 'Key',
     valuePlaceholder = 'Value',
     keySuggestions,
+    keyHints,
+    valueSuggestions,
     allowSecret = false,
     showDescription = true,
     allowBulkEdit = true,
@@ -432,6 +441,7 @@ function KeyValueTableInner<T extends KeyValueItem>({
                                                 : keyPlaceholder
                                         }
                                         value={item.key}
+                                        suggestions={keyHints}
                                         onChange={(key) => patch({ key } as Partial<T>)}
                                     />
                                 )}
@@ -449,6 +459,7 @@ function KeyValueTableInner<T extends KeyValueItem>({
                                         placeholder={valuePlaceholder}
                                         value={item.value}
                                         masked={!!item.secret}
+                                        suggestions={valueSuggestions?.(item.key)}
                                         onChange={(value) => patch({ value } as Partial<T>)}
                                     />
                                 )}

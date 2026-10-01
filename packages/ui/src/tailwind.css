@@ -431,3 +431,16 @@ mark[data-find][data-current] {
     outline: 1px solid #f59f00;
     border-radius: 2px;
 }
+
+/* {{variables}} inside the Monaco editors, drawn like the chips of the single-line fields. */
+.hr-var {
+    background: var(--color-var-bg);
+    border-radius: 3px;
+    box-shadow: 0 0 0 1px var(--color-var-ring);
+}
+
+.hr-var-missing {
+    background: var(--color-var-missing-bg);
+    border-radius: 3px;
+    box-shadow: 0 0 0 1px var(--color-var-missing-ring);
+}

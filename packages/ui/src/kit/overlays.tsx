@@ -22,6 +22,7 @@ import {
     useListNavigation,
     useMergeRefs,
     useRole,
+    type OpenChangeReason,
     type Placement,
 } from '@floating-ui/react';
 import {
@@ -144,11 +145,18 @@ const PopoverContext = createContext<PopoverState | null>(null);
 
 export interface PopoverProps {
     opened: boolean;
-    onClose?: () => void;
+    /** Called when the panel asks to close; `reason` says whether it was Escape, a press outside, … */
+    onClose?: (reason?: OpenChangeReason) => void;
     position?: Placement;
     offset?: number;
     /** `target` matches the dropdown to its trigger's width. */
     width?: number | 'target';
+    /**
+     * Closes the panel when the pointer goes down anywhere outside it and its target. Off by
+     * default: a panel anchored to an input (the variable hints) must not close as it is clicked.
+     * Menus opened from inside the panel count as inside, as they are its React children.
+     */
+    closeOnClickOutside?: boolean;
     children: ReactNode;
 }
 
@@ -159,12 +167,13 @@ export function Popover({
     position = 'bottom',
     offset = 6,
     width,
+    closeOnClickOutside = false,
     children,
 }: PopoverProps) {
     const { refs, floatingStyles, context } = useFloating({
         transform: false,
         open: opened,
-        onOpenChange: (open) => !open && onClose?.(),
+        onOpenChange: (open, _event, reason) => !open && onClose?.(reason),
         placement: position,
         whileElementsMounted: autoUpdate,
         middleware: [
@@ -180,8 +189,8 @@ export function Popover({
         ],
     });
     const { getReferenceProps, getFloatingProps } = useInteractions([
-        // Escape closes it; an outside press is the caller's call, as the target is often an input.
-        useDismiss(context, { outsidePress: false }),
+        // Escape closes it; an outside press only when asked, as the target is often an input.
+        useDismiss(context, { outsidePress: closeOnClickOutside }),
         useRole(context, { role: 'dialog' }),
     ]);
 
@@ -201,10 +210,19 @@ export function Popover({
     );
 }
 
-function PopoverTarget({ children }: { children: ReactElement }) {
+/**
+ * Any ref and props it is given go on to the trigger, so a `Tooltip` can wrap a `Target`
+ * (`<Tooltip><Popover.Target><ActionIcon/></Popover.Target></Tooltip>`) and both behave.
+ */
+function PopoverTarget({
+    children,
+    ref,
+    ...props
+}: { children: ReactElement; ref?: Ref<HTMLElement> } & ReferenceProps) {
     const state = useContext(PopoverContext)!;
+    const merged = useMergeRefs([state.reference, ref ?? null]);
     return (
-        <Trigger reference={state.reference} props={state.referenceProps}>
+        <Trigger reference={merged} props={{ ...state.referenceProps, ...props }}>
             {children}
         </Trigger>
     );

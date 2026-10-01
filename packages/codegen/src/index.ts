@@ -10,53 +10,25 @@ import {
     type HttpRequest,
 } from '@httpreq/shared';
 import type { PipelineContext } from '@httpreq/api-client';
-import {
-    grpcurlGenerator,
-    mosquittoGenerator,
-    nodeGrpcGenerator,
-    nodeMqttGenerator,
-    pythonPahoGenerator,
-} from './generators/grpc-mqtt';
-import { csharpHttpClientGenerator, goNetHttpGenerator } from './generators/http-csharp-go';
-import {
-    curlGenerator,
-    javascriptFetchGenerator,
-    nodeAxiosGenerator,
-} from './generators/http-curl-js';
-import {
-    phpCurlGenerator,
-    powershellGenerator,
-    rubyNetHttpGenerator,
-    swiftUrlSessionGenerator,
-} from './generators/http-others';
-import { javaHttpClientGenerator, pythonRequestsGenerator } from './generators/http-python-java';
 import { buildCodegenRequest, codegenFailureReason } from './input';
+import { DEFAULT_GENERATORS } from './generators';
 import { CodeGeneratorRegistry } from './registry';
 
+export * from './core/json';
+export * from './core/model';
+export { CodeWriter } from './core/writer';
+export { defineHttpGenerator, defineProtocolGenerator } from './core/define';
 export * from './errors';
 export * from './input';
 export * from './redact';
 export * from './registry';
 
-/** The generators the app ships with, in the order the selector lists them. */
+/** A registry holding every generator the app ships with (see `DEFAULT_GENERATORS`). */
 export const createDefaultCodegenRegistry = (): CodeGeneratorRegistry =>
-    new CodeGeneratorRegistry()
-        .register(curlGenerator)
-        .register(javascriptFetchGenerator)
-        .register(nodeAxiosGenerator)
-        .register(pythonRequestsGenerator)
-        .register(javaHttpClientGenerator)
-        .register(csharpHttpClientGenerator)
-        .register(goNetHttpGenerator)
-        .register(phpCurlGenerator)
-        .register(rubyNetHttpGenerator)
-        .register(powershellGenerator)
-        .register(swiftUrlSessionGenerator)
-        .register(grpcurlGenerator)
-        .register(nodeGrpcGenerator)
-        .register(mosquittoGenerator)
-        .register(nodeMqttGenerator)
-        .register(pythonPahoGenerator);
+    DEFAULT_GENERATORS.reduce(
+        (registry, generator) => registry.register(generator),
+        new CodeGeneratorRegistry(),
+    );
 
 export const defaultCodegen = createDefaultCodegenRegistry();
 

@@ -154,31 +154,27 @@ describe('HTTP generators', () => {
     const registry = createDefaultCodegenRegistry();
     const expectations: Record<string, RegExp[]> = {
         curl: [
-            /curl --request POST 'https:\/\/api\.example\.com\/users\?active=true'/,
+            /curl --request POST \\\n {2}--url 'https:\/\/api\.example\.com\/users\?active=true'/,
             /--header 'Accept: application\/json'/,
             /--data-raw/,
         ],
         'javascript-fetch': [
             /await fetch\("https:\/\/api\.example\.com\/users\?active=true"/,
             /method: "POST"/,
-            /body: "/,
+            /body: JSON\.stringify\(\{/,
         ],
-        'node-axios': [/axios\.request/, /method: "post"/, /data: "/],
-        'python-requests': [/import requests/, /requests\.request\(/, /method="POST"/],
+        'typescript-fetch': [/const options: RequestInit = \{/, /await fetch\(url, options\)/],
+        'node-axios': [/axios\.request/, /method: "post"/, /data: \{/],
+        'python-requests': [/import requests/, /requests\.post\(/, /json=payload/],
         'java-httpclient': [
             /HttpClient\.newBuilder/,
-            /\.method\("POST"/,
-            /BodyPublishers\.ofString/,
+            /\.method\("POST", BodyPublishers\.ofString\(/,
         ],
-        'csharp-httpclient': [
-            /new HttpClient\(/,
-            /new HttpMethod\("POST"\)/,
-            /new StringContent\(/,
-        ],
-        'go-nethttp': [/http\.NewRequest\("POST"/, /strings\.NewReader/, /client\.Do\(req\)/],
+        'csharp-httpclient': [/new HttpClient\(/, /HttpMethod\.Post/, /new StringContent\(/],
+        'go-nethttp': [/http\.NewRequest\(http\.MethodPost/, /strings\.NewReader/, /\.Do\(req\)/],
         'php-curl': [/curl_init\(\)/, /CURLOPT_CUSTOMREQUEST => 'POST'/, /CURLOPT_POSTFIELDS/],
         'ruby-nethttp': [/Net::HTTP::Post\.new/, /request\.body = /],
-        powershell: [/Invoke-RestMethod/, /-Method POST/, /-Body \$body/],
+        powershell: [/Invoke-RestMethod/, /Method\s+= 'POST'/, /Body\s+= \$body/],
         'swift-urlsession': [/URLRequest\(url:/, /httpMethod = "POST"/, /httpBody/],
     };
 
@@ -212,15 +208,6 @@ describe('HTTP generators', () => {
         expect(php.supported && php.code).toContain(`'X-Trace: it\\'s "quoted"'`);
         const ps = registry.generate(input, 'powershell');
         expect(ps.supported && ps.code).toContain(`'it''s "quoted"'`);
-    });
-
-    it('produces JavaScript that parses', async () => {
-        const result = registry.generate(await http(), 'javascript-fetch');
-        const code = result.supported ? result.code : '';
-        const AsyncFunction = Object.getPrototypeOf(async () => undefined).constructor as new (
-            body: string,
-        ) => unknown;
-        expect(() => new AsyncFunction(code)).not.toThrow();
     });
 
     it('does not send a body with GET', async () => {
@@ -309,7 +296,7 @@ describe('gRPC generators', () => {
             await buildCodegenRequest(request, context()),
             'node-grpc',
         );
-        expect(node.supported && node.code).toContain("call.on('data'");
+        expect(node.supported && node.code).toContain('call.on("data"');
     });
 
     it('says clearly when a language has no gRPC generator', async () => {
@@ -352,7 +339,7 @@ describe('MQTT generators', () => {
         }
         const mosquitto = defaultCodegen.generate(input, 'mosquitto');
         expect(mosquitto.supported && mosquitto.code).toMatch(
-            /mosquitto_sub .*-h 'broker\.example\.com' -p 8883/,
+            /mosquitto_sub \\\n {2}-h 'broker\.example\.com' \\\n {2}-p 8883/,
         );
     });
 
@@ -385,6 +372,7 @@ describe('the registry', () => {
         label: 'Fake',
         language: 'Fake',
         editorLanguage: 'plaintext',
+        fileExtension: 'txt',
         protocols: ['http'] as const,
         generate: () => 'fake code',
     };

@@ -12,7 +12,7 @@ import {
     IconSend,
     IconTerminal2,
 } from '@tabler/icons-react';
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
 import {
     HTTP_METHODS,
     PROTOCOL_IDS,
@@ -55,6 +55,8 @@ interface Props {
     onSaveAs?: () => void;
     onCopyCurl: () => void;
     onDuplicate: () => void;
+    /** Controls shown between the URL field and Save, e.g. the code generation button. */
+    actions?: ReactNode;
     sendShortcut?: string;
     saveShortcut?: string;
     saveAsShortcut?: string;
@@ -91,6 +93,7 @@ export function UrlBar({
     onSaveAs,
     onCopyCurl,
     onDuplicate,
+    actions,
     sendShortcut,
     saveShortcut,
     saveAsShortcut,
@@ -176,6 +179,8 @@ export function UrlBar({
                     }}
                 />
             </div>
+
+            {actions}
 
             <Tooltip label={saveTitle}>
                 <Button

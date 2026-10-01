@@ -24,6 +24,8 @@ export interface WorkspacePreferences {
     generatedHeadersVisible: boolean;
     /** Page zoom level of the browser build (0 = 100%); the desktop app zooms natively. */
     zoomLevel: number;
+    /** The code generation target last chosen, so the next request opens on it. */
+    codeLanguage: string;
 }
 
 interface PreferencesState extends WorkspacePreferences {
@@ -34,6 +36,7 @@ interface PreferencesState extends WorkspacePreferences {
     toggleStatusBar: () => void;
     setGeneratedHeadersVisible: (visible: boolean) => void;
     setZoomLevel: (level: number) => void;
+    setCodeLanguage: (id: string) => void;
 }
 
 /** The localStorage key the preferences are saved under. */
@@ -44,6 +47,7 @@ export const MAX_SPLIT_RATIO = 0.9;
 export const DEFAULT_SIDEBAR_WIDTH = 300;
 export const MIN_SIDEBAR_WIDTH = 220;
 export const MAX_SIDEBAR_WIDTH = 560;
+export const DEFAULT_CODE_LANGUAGE = 'curl';
 
 /** Keeps a dragged or restored sidebar width inside the range the layout supports. */
 export const clampSidebarWidth = (width: number) =>
@@ -57,6 +61,7 @@ export const defaultPreferences = (): WorkspacePreferences => ({
     statusBarVisible: true,
     generatedHeadersVisible: true,
     zoomLevel: 0,
+    codeLanguage: DEFAULT_CODE_LANGUAGE,
 });
 
 /** Keeps a split position far enough from both edges that neither pane can be dragged out of
@@ -108,6 +113,10 @@ export const parsePreferences = (raw: string | null): WorkspacePreferences => {
         zoomLevel: isRatio(stored.zoomLevel)
             ? clampZoomLevel(stored.zoomLevel)
             : defaults.zoomLevel,
+        codeLanguage:
+            typeof stored.codeLanguage === 'string' && /^[a-z0-9-]{1,64}$/.test(stored.codeLanguage)
+                ? stored.codeLanguage
+                : defaults.codeLanguage,
     };
 };
 
@@ -138,6 +147,7 @@ export const usePreferences = create<PreferencesState>((set) => ({
     toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
     setGeneratedHeadersVisible: (generatedHeadersVisible) => set({ generatedHeadersVisible }),
     setZoomLevel: (level) => set({ zoomLevel: clampZoomLevel(level) }),
+    setCodeLanguage: (codeLanguage) => set({ codeLanguage }),
 }));
 
 const snapshot = (state: WorkspacePreferences): WorkspacePreferences => ({
@@ -148,6 +158,7 @@ const snapshot = (state: WorkspacePreferences): WorkspacePreferences => ({
     statusBarVisible: state.statusBarVisible,
     generatedHeadersVisible: state.generatedHeadersVisible,
     zoomLevel: state.zoomLevel,
+    codeLanguage: state.codeLanguage,
 });
 
 // Writes are debounced so bursts of changes (e.g. keyboard-resizing the splitter) cost one write.
@@ -171,7 +182,8 @@ usePreferences.subscribe((state, previous) => {
         state.sidebarWidth !== previous.sidebarWidth ||
         state.statusBarVisible !== previous.statusBarVisible ||
         state.generatedHeadersVisible !== previous.generatedHeadersVisible ||
-        state.zoomLevel !== previous.zoomLevel
+        state.zoomLevel !== previous.zoomLevel ||
+        state.codeLanguage !== previous.codeLanguage
     ) {
         persist(state);
     }

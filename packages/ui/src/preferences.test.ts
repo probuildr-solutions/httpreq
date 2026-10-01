@@ -30,7 +30,18 @@ describe('parsePreferences', () => {
             statusBarVisible: false,
             generatedHeadersVisible: false,
             zoomLevel: 0,
+            codeLanguage: 'curl',
         });
+    });
+
+    it('remembers the code generation target, and ignores a malformed one', () => {
+        expect(
+            parsePreferences(JSON.stringify({ codeLanguage: 'python-requests' })).codeLanguage,
+        ).toBe('python-requests');
+        expect(parsePreferences(JSON.stringify({ codeLanguage: '<script>' })).codeLanguage).toBe(
+            'curl',
+        );
+        expect(parsePreferences(JSON.stringify({ codeLanguage: 7 })).codeLanguage).toBe('curl');
     });
 
     it('keeps valid fields and replaces invalid ones', () => {

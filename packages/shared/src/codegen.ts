@@ -96,6 +96,10 @@ export interface CodeGenerator<R extends CodegenRequest = CodegenRequest> {
     readonly language: string;
     /** Monaco language id used for highlighting. */
     readonly editorLanguage: string;
+    /** File extension without the dot, used when the code is saved to a file, e.g. `py`. */
+    readonly fileExtension: string;
+    /** Runtime or library version the output needs, shown beside the selector, e.g. `Java 15+`. */
+    readonly requirements?: string;
     readonly protocols: readonly ProtocolId[];
     generate(request: R, options: CodegenOptions): string;
 }

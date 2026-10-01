@@ -12,10 +12,11 @@
 // version, and unless every packaged app (app.asar) reports that same version, which is what
 // `app.getVersion()` returns at runtime. It also fails if a packaged app.asar is missing its
 // bundled renderer or contains source maps, or if the Electron binary's security fuses are not
-// the ones the build asked for. It then writes SHA256SUMS-<platform>.txt beside them.
+// the ones the build asked for. On macOS it also checks the signature of every app and installer
+// (see the macOS section below). It then writes SHA256SUMS-<platform>.txt beside them.
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
     appendFileSync,
     mkdirSync,
@@ -41,6 +42,7 @@ const expected = {
     win: [new RegExp(`^HttpReq-Setup-${v}-x64\\.exe$`)],
     mac: ['x64', 'arm64'].flatMap((arch) => [
         new RegExp(`^HttpReq-${v}-mac-${arch}\\.dmg$`),
+        new RegExp(`^HttpReq-${v}-mac-${arch}\\.pkg$`),
         new RegExp(`^HttpReq-${v}-mac-${arch}\\.zip$`),
     ]),
     linux: [
@@ -162,45 +164,154 @@ if (deb) {
         errors.push(`${deb} has Version ${debVersion}, expected ${version}.`);
 }
 
-// macOS: an app whose signature does not verify is reported as "damaged" once downloaded, and an
-// arm64 app must contain arm64 code. Check what the user will actually install: the app inside
-// every zip and every dmg (mounted), for the architecture its file name claims.
+// macOS: an app whose signature does not verify is reported as "damaged" once downloaded, an
+// arm64 app must contain arm64 code, and an app that is not signed with a Developer ID certificate
+// and notarized is met with "Apple could not verify ..." on first open. Check what the user will
+// actually install: the app inside every zip, every dmg (mounted) and every pkg (expanded), for the
+// architecture its file name claims, and the pkg's own signature and notarization.
+//
+// Whether the build was meant to be trusted is read from the packages, not from the environment
+// (this step does not hold the certificates): a Developer ID signature is fully checked, an ad hoc
+// one is reported. HTTPREQ_REQUIRE_SIGNING=1, which the release workflow sets, makes an ad hoc or
+// unsigned package an error, so a release can never contain one by accident.
 if (platform === 'mac') {
-    const run = (command, args) =>
-        execFileSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     const archNames = { x64: 'x86_64', arm64: 'arm64' };
-    const signedWithDeveloperId = Boolean(process.env.CSC_LINK || process.env.CSC_NAME);
+    const requireSigning = process.env.HTTPREQ_REQUIRE_SIGNING === '1';
+
+    /** Runs a tool and returns what it printed, whatever stream it chose, and whether it succeeded. */
+    const inspect = (command, args) => {
+        const result = spawnSync(command, args, { encoding: 'utf8' });
+        return { ok: result.status === 0, text: `${result.stdout ?? ''}${result.stderr ?? ''}` };
+    };
 
     const checkApp = (label, appPath, arch) => {
-        try {
-            run('codesign', ['--verify', '--deep', '--strict', '--verbose=2', appPath]);
-        } catch (error) {
+        const verified = inspect('codesign', [
+            '--verify',
+            '--deep',
+            '--strict',
+            '--verbose=2',
+            appPath,
+        ]);
+        if (!verified.ok) {
             errors.push(
-                `${label}: the app's code signature is invalid, so macOS would report it as damaged. ${
-                    error.stderr ?? error.message
-                }`.trim(),
+                `${label}: the app's code signature is invalid, so macOS would report it as damaged. ${verified.text}`.trim(),
             );
             return;
         }
         const executable = join(appPath, 'Contents', 'MacOS', 'HttpReq');
-        const archs = run('lipo', ['-archs', executable]).trim().split(/\s+/);
+        const archs = inspect('lipo', ['-archs', executable]).text.trim().split(/\s+/);
         if (!archs.includes(archNames[arch])) {
             errors.push(`${label}: the executable contains ${archs.join(', ')}, expected ${arch}.`);
         }
-        if (signedWithDeveloperId) {
-            try {
-                run('spctl', ['--assess', '--type', 'execute', '--verbose=2', appPath]);
-                run('xcrun', ['stapler', 'validate', appPath]);
-            } catch (error) {
+
+        const details = inspect('codesign', ['--display', '--verbose=4', appPath]).text;
+        const developerId = /Authority=Developer ID Application/.test(details);
+        if (!developerId) {
+            const kind = /Signature=adhoc/.test(details)
+                ? 'ad hoc signed'
+                : 'not signed by Developer ID';
+            if (requireSigning) {
                 errors.push(
-                    `${label}: Gatekeeper or notarization check failed. ${error.stderr ?? ''}`,
+                    `${label}: the app is ${kind}, so macOS would show "Apple could not verify" when it is opened. A release needs a Developer ID Application certificate and notarization (see docs/distribution.md).`,
+                );
+            } else {
+                console.log(
+                    `${label}: ${kind}; macOS will ask the user to allow it in Privacy & Security.`,
+                );
+            }
+            return;
+        }
+
+        // Developer ID: everything notarization demands, and Gatekeeper's own verdict.
+        if (!/flags=0x[0-9a-f]+\([^)]*runtime/.test(details)) {
+            errors.push(
+                `${label}: the hardened runtime is off, so Apple would have rejected it for notarization.`,
+            );
+        }
+        const entitlements = inspect('codesign', [
+            '--display',
+            '--entitlements',
+            ':-',
+            appPath,
+        ]).text;
+        if (!entitlements.includes('com.apple.security.cs.allow-jit')) {
+            errors.push(
+                `${label}: the allow-jit entitlement is missing, so the JIT would be killed under the hardened runtime and the app would crash on launch.`,
+            );
+        }
+        const assessed = inspect('spctl', [
+            '--assess',
+            '--type',
+            'execute',
+            '--verbose=2',
+            appPath,
+        ]);
+        if (!assessed.ok || !/Notarized Developer ID/.test(assessed.text)) {
+            errors.push(
+                `${label}: Gatekeeper does not accept it as notarized. ${assessed.text}`.trim(),
+            );
+        }
+        const stapled = inspect('xcrun', ['stapler', 'validate', appPath]);
+        if (!stapled.ok)
+            errors.push(
+                `${label}: no notarization ticket is stapled to the app. ${stapled.text}`.trim(),
+            );
+    };
+
+    /** The installer's own signature, then the app it installs. */
+    const checkPkg = (label, pkgPath, arch, scratch) => {
+        const signature = inspect('pkgutil', ['--check-signature', pkgPath]).text;
+        const signed = /Status: signed/.test(signature);
+        if (!signed) {
+            if (requireSigning) {
+                errors.push(
+                    `${label}: the installer is not signed, so macOS would refuse to open it without the user overriding Gatekeeper. A release needs a Developer ID Installer certificate (see docs/distribution.md).`,
+                );
+            } else {
+                console.log(
+                    `${label}: not signed; macOS will ask the user to allow it in Privacy & Security.`,
                 );
             }
         } else {
-            const details = run('codesign', ['--display', '--verbose=2', appPath]);
-            const [firstLine] = details.split('\n');
-            console.log(`${label}: ad hoc signed (no Developer ID certificate) ${firstLine}`);
+            if (!/Developer ID Installer/.test(signature)) {
+                errors.push(
+                    `${label}: signed, but not with a Developer ID Installer certificate. ${signature}`.trim(),
+                );
+            }
+            const assessed = inspect('spctl', [
+                '--assess',
+                '--type',
+                'install',
+                '--verbose=2',
+                pkgPath,
+            ]);
+            if (!assessed.ok || !/Notarized Developer ID/.test(assessed.text)) {
+                errors.push(
+                    `${label}: Gatekeeper does not accept the installer as notarized. ${assessed.text}`.trim(),
+                );
+            }
+            const stapled = inspect('xcrun', ['stapler', 'validate', pkgPath]);
+            if (!stapled.ok) {
+                errors.push(
+                    `${label}: no notarization ticket is stapled to the installer. ${stapled.text}`.trim(),
+                );
+            }
         }
+
+        const expanded = join(scratch, `pkg-${arch}`);
+        const expansion = inspect('pkgutil', ['--expand-full', pkgPath, expanded]);
+        if (!expansion.ok) {
+            errors.push(`${label}: the installer could not be expanded. ${expansion.text}`.trim());
+            return;
+        }
+        const app = readdirSync(expanded, { recursive: true }).find(
+            (path) => String(path).endsWith('HttpReq.app') && !String(path).includes('Contents'),
+        );
+        if (!app) {
+            errors.push(`${label}: the installer does not contain HttpReq.app.`);
+            return;
+        }
+        checkApp(label, join(expanded, String(app)), arch);
     };
 
     const scratch = mkdtempSync(join(tmpdir(), 'httpreq-verify-'));
@@ -209,7 +320,7 @@ if (platform === 'mac') {
             const zip = packages.find((name) => name?.endsWith(`-mac-${arch}.zip`));
             if (zip) {
                 const target = join(scratch, `zip-${arch}`);
-                run('ditto', ['-x', '-k', join(release, zip), target]);
+                execFileSync('ditto', ['-x', '-k', join(release, zip), target]);
                 checkApp(zip, join(target, 'HttpReq.app'), arch);
             }
             const dmg = packages.find((name) => name?.endsWith(`-mac-${arch}.dmg`));
@@ -217,26 +328,31 @@ if (platform === 'mac') {
                 const mountPoint = join(scratch, `dmg-${arch}`);
                 mkdirSync(mountPoint);
                 try {
-                    run('hdiutil', ['verify', join(release, dmg)]);
-                    run('hdiutil', [
+                    const dmgPath = join(release, dmg);
+                    const checked = inspect('hdiutil', ['verify', dmgPath]);
+                    if (!checked.ok) throw new Error(checked.text);
+                    const attached = inspect('hdiutil', [
                         'attach',
                         '-nobrowse',
                         '-readonly',
                         '-mountpoint',
                         mountPoint,
-                        join(release, dmg),
+                        dmgPath,
                     ]);
+                    if (!attached.ok) throw new Error(attached.text);
                     try {
                         checkApp(dmg, join(mountPoint, 'HttpReq.app'), arch);
                     } finally {
-                        run('hdiutil', ['detach', '-force', mountPoint]);
+                        inspect('hdiutil', ['detach', '-force', mountPoint]);
                     }
                 } catch (error) {
                     errors.push(
-                        `${dmg}: the disk image could not be verified or mounted. ${error.stderr ?? error.message}`,
+                        `${dmg}: the disk image could not be verified or mounted. ${error.message}`,
                     );
                 }
             }
+            const pkg = packages.find((name) => name?.endsWith(`-mac-${arch}.pkg`));
+            if (pkg) checkPkg(pkg, join(release, pkg), arch, scratch);
         }
     } finally {
         rmSync(scratch, { recursive: true, force: true });

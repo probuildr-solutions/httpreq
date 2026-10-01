@@ -17,8 +17,9 @@ import {
     type TextContentType,
 } from '@httpreq/shared';
 import { formatBytes, hasAttachment, rememberFile } from '../attachments';
-import { prettyXmlText } from '../prettyText';
 import { CodeEditor } from './CodeEditor';
+import { firstJsonError } from './intelligence/jsonDiagnostics';
+import { FORM_FIELD_NAMES, formValueSuggestions } from './intelligence/requestHints';
 import { KeyValueTable } from './KeyValueTable';
 import {
     Badge,
@@ -60,17 +61,6 @@ const RAW_FORMAT_OPTIONS = (['json', ...TEXT_CONTENT_TYPES] as RawFormat[]).map(
     label: RAW_FORMATS[value].label,
 }));
 
-/** JSON validity ignoring `{{variables}}`, which are substituted before sending. */
-const jsonError = (text: string): string | null => {
-    if (!text.trim()) return null;
-    try {
-        JSON.parse(text.replace(/\{\{[^{}]+\}\}/g, '0'));
-        return null;
-    } catch (error) {
-        return (error as Error).message;
-    }
-};
-
 interface Props {
     request: HttpRequest;
     onChange: (patch: Partial<HttpRequest>) => void;
@@ -84,7 +74,7 @@ export function BodyPanel({ request, onChange }: Props) {
     const rawFormat: RawFormat = body.mode === 'json' ? 'json' : body.textContentType;
     const rawContent = body.mode === 'json' ? body.json : body.text;
     const error = useMemo(
-        () => (body.mode === 'json' ? jsonError(body.json) : null),
+        () => (body.mode === 'json' ? firstJsonError(body.json) : null),
         [body.mode, body.json],
     );
 
@@ -108,18 +98,8 @@ export function BodyPanel({ request, onChange }: Props) {
         }
     };
     const format = () => {
-        const instance = rawEditor.current;
-        if (!instance) return;
-        if (rawFormat === 'application/xml') {
-            const pretty = prettyXmlText(instance.getValue());
-            if (pretty.ok) {
-                instance.executeEdits('format', [
-                    { range: instance.getModel()!.getFullModelRange(), text: pretty.text },
-                ]);
-            }
-        } else {
-            void instance.getAction('editor.action.formatDocument')?.run();
-        }
+        // JSON is formatted by Monaco's language service, XML by the provider in `intelligence/xmlFeature`.
+        void rawEditor.current?.getAction('editor.action.formatDocument')?.run();
     };
     const canFormat = rawFormat === 'json' || rawFormat === 'application/xml';
     const noBodyMethod = request.method === 'GET' || request.method === 'HEAD';
@@ -203,6 +183,8 @@ export function BodyPanel({ request, onChange }: Props) {
             {body.mode === 'form-urlencoded' && (
                 <KeyValueTable
                     label="Form fields"
+                    keyHints={FORM_FIELD_NAMES}
+                    valueSuggestions={formValueSuggestions}
                     items={body.formUrlEncoded}
                     onChange={(formUrlEncoded) => setBody({ formUrlEncoded })}
                 />

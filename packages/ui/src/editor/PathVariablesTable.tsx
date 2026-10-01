@@ -4,6 +4,8 @@
  */
 
 import type { KeyValueItem } from '@httpreq/shared';
+import { useVariables } from '../variableContext';
+import { pathVariableSuggestions } from './intelligence/requestHints';
 import { VariableInput } from './VariableInput';
 import { Text, cx } from '../kit';
 
@@ -20,7 +22,9 @@ interface Props {
  * removed as it is typed), so only the value and description are editable here.
  */
 export function PathVariablesTable({ items, onChange }: Props) {
+    const { resolver } = useVariables();
     if (items.length === 0) return null;
+    const variableNames = resolver.names();
     const update = (id: string, patch: Partial<KeyValueItem>) =>
         onChange(items.map((item) => (item.id === id ? { ...item, ...patch } : item)));
     return (
@@ -61,6 +65,8 @@ export function PathVariablesTable({ items, onChange }: Props) {
                                 variant="cell"
                                 aria-label={`Value of ${item.key}`}
                                 placeholder="Value"
+                                // The environment variable named like the path variable, if there is one.
+                                suggestions={pathVariableSuggestions(item.key, variableNames)}
                                 value={item.value}
                                 onChange={(value) => update(item.id, { value })}
                             />

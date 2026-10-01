@@ -22,6 +22,48 @@ export const BASE_EDITOR_OPTIONS: editor.IStandaloneEditorConstructionOptions = 
     tabSize: INDENT_SIZE,
     insertSpaces: true,
     detectIndentation: false,
+    lineNumbersMinChars: 3,
+    renderLineHighlight: 'line',
+    // The scrollbar track stays out of the way of a compact panel.
+    scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+};
+
+/**
+ * What makes an editor you type in helpful without making it heavy: brackets and quotes close
+ * and surround, matching pairs are coloured, suggestions open on trigger characters and Tab
+ * accepts them, and only words from the document itself are suggested (a script editor must not
+ * offer words from the body editor beside it).
+ */
+export const AUTHORING_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
+    autoClosingBrackets: 'languageDefined',
+    autoClosingQuotes: 'languageDefined',
+    autoClosingOvertype: 'auto',
+    autoSurround: 'languageDefined',
+    bracketPairColorization: { enabled: true },
+    matchBrackets: 'always',
+    suggestOnTriggerCharacters: true,
+    tabCompletion: 'on',
+    wordBasedSuggestions: 'currentDocument',
+    parameterHints: { enabled: true },
+    suggest: {
+        showWords: true,
+        preview: true,
+        insertMode: 'replace',
+        snippetsPreventQuickSuggestions: false,
+    },
+    quickSuggestions: { other: true, comments: false, strings: false },
+    formatOnPaste: false,
+};
+
+/** Options for output the user only reads: generated code, a response. */
+export const READ_ONLY_OPTIONS: editor.IStandaloneEditorConstructionOptions = {
+    readOnly: true,
+    renderLineHighlight: 'none',
+    padding: { top: 8, bottom: 8 },
+    domReadOnly: true,
+    contextmenu: true,
+    occurrencesHighlight: 'off',
+    selectionHighlight: false,
 };
 
 /** Applies the app's indentation to a model, whatever it was created with. */
