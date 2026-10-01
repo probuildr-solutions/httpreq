@@ -34,6 +34,7 @@ import { buildCommands, type AppDialog } from './app/buildCommands';
 import { EmptyWorkspace } from './app/EmptyWorkspace';
 import { pipelineContext } from './app/pipelineContext';
 import { useAppUpdates } from './app/useAppUpdates';
+import { useEditorCatalog } from './app/useEditorCatalog';
 import { useSendRequest } from './app/useSendRequest';
 import { useWindowZoom } from './app/useWindowZoom';
 import { useWorkbenchTabs } from './app/useWorkbenchTabs';
@@ -177,6 +178,7 @@ export function HttpReqApp({
     const setActiveEnvironmentTab = useWorkbenchStore((state) => state.setActiveEnvironmentTab);
     const moveEnvironmentTab = useWorkbenchStore((state) => state.moveEnvironmentTab);
     const environments = useWorkbenchStore((state) => state.workspace.environments);
+    const requests = useWorkbenchStore((state) => state.workspace.requests);
     const activeEnvironmentId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
     const activeId = useWorkbenchStore((state) => state.activeRequestId);
     const activeProtocol = useWorkbenchStore((state) => {
@@ -234,6 +236,8 @@ export function HttpReqApp({
             environmentName: environment?.name ?? null,
         };
     }, [environments, activeEnvironmentId]);
+    // The editors suggest from the same variables, and from the keys other requests use.
+    useEditorCatalog(variableScope.resolver, requests);
 
     const authServices = useMemo<AuthServices>(
         () => ({

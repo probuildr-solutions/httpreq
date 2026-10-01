@@ -5,6 +5,8 @@
 
 import { loader } from '@monaco-editor/react';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
+// The editor features (suggestions, hover, formatting, find, folding) the bare API leaves out.
+import './editor/contributions';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import 'monaco-editor/esm/vs/language/json/monaco.contribution';
 import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
@@ -23,6 +25,8 @@ import 'monaco-editor/esm/vs/basic-languages/python/python.contribution';
 import 'monaco-editor/esm/vs/basic-languages/ruby/ruby.contribution';
 import 'monaco-editor/esm/vs/basic-languages/shell/shell.contribution';
 import 'monaco-editor/esm/vs/basic-languages/swift/swift.contribution';
+import 'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution';
+import { registerEditorIntelligence } from './editor/intelligence';
 
 (
     globalThis as typeof globalThis & {
@@ -35,6 +39,9 @@ import 'monaco-editor/esm/vs/basic-languages/swift/swift.contribution';
 };
 
 loader.config({ monaco });
+
+// Completion, hover, validation and highlighting for variables, JSON, XML and scripts.
+registerEditorIntelligence(monaco);
 
 // Monaco measures glyph widths once. The bundled monospace web font may finish loading after the
 // first editor mounts, so re-measure when it arrives to keep the cursor aligned with the text.

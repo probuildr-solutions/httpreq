@@ -58,7 +58,6 @@ export const EDITOR_TABS = [
     'authorization',
     'protocol',
     'scripts',
-    'code',
     'sharing',
     'settings',
 ] as const;

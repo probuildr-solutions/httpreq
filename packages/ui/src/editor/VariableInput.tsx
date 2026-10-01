@@ -39,6 +39,11 @@ export interface VariableInputProps extends NativeProps {
     invalid?: boolean;
     /** Offers `{{variable}}` completion after typing `{{`. */
     completion?: boolean;
+    /**
+     * Likely values (a header's usual values, say), offered while the field has focus and is not
+     * being used for a `{{variable}}`. Choosing one replaces the whole value.
+     */
+    suggestions?: readonly string[];
 }
 
 const COMPLETION_TRIGGER = /\{\{\s*([^{}\s]*)$/;
@@ -89,6 +94,7 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
             rightSection,
             invalid,
             completion = true,
+            suggestions: valueHints,
             className,
             onKeyDown,
             onBlur,
@@ -164,16 +170,28 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
             if (hover) releaseHover();
         };
 
-        /* `{{` completion. */
-        const [suggest, setSuggest] = useState<{ query: string; index: number } | null>(null);
+        /*
+         * Completion: `{{` offers variable names; otherwise, when the field has value hints, they
+         * are offered as the field is used. Both fill the same list.
+         */
+        const [suggest, setSuggest] = useState<{
+            query: string;
+            index: number;
+            hint: boolean;
+        } | null>(null);
         const suggestions = useMemo(() => {
             if (!suggest) return [];
             const query = suggest.query.toLowerCase();
+            if (suggest.hint) {
+                return (valueHints ?? [])
+                    .filter((hint) => hint !== value && hint.toLowerCase().includes(query))
+                    .slice(0, 8);
+            }
             return resolver
                 .names()
                 .filter((name) => name.toLowerCase().includes(query))
                 .slice(0, 8);
-        }, [suggest, resolver]);
+        }, [suggest, resolver, valueHints, value]);
 
         const updateSuggestions = () => {
             const input = inputRef.current;
@@ -188,7 +206,10 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
                 return;
             }
             const match = COMPLETION_TRIGGER.exec(input.value.slice(0, input.selectionStart ?? 0));
-            setSuggest(match ? { query: match[1]!, index: 0 } : null);
+            if (match) setSuggest({ query: match[1]!, index: 0, hint: false });
+            else if (valueHints?.length)
+                setSuggest({ query: input.value.trim(), index: 0, hint: true });
+            else setSuggest(null);
         };
 
         const accept = (name: string) => {
@@ -207,6 +228,13 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
             });
         };
 
+        /** Takes the chosen entry: a variable name goes in as `{{name}}`, a value hint replaces the value. */
+        const choose = (item: string) => {
+            if (!suggest?.hint) return accept(item);
+            onChange(item);
+            setSuggest(null);
+        };
+
         const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
             if (suggest && suggestions.length) {
                 if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -220,7 +248,7 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
                 }
                 if (event.key === 'Enter' || event.key === 'Tab') {
                     event.preventDefault();
-                    accept(suggestions[suggest.index]!);
+                    choose(suggestions[suggest.index]!);
                     return;
                 }
                 if (event.key === 'Escape') {
@@ -318,6 +346,10 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
                                 onSelect={syncScroll}
                                 onMouseMove={(event) => onPointerMove(event.clientX, event.clientY)}
                                 onMouseLeave={releaseHover}
+                                onFocus={(event) => {
+                                    inputProps.onFocus?.(event);
+                                    updateSuggestions();
+                                }}
                                 onBlur={(event) => {
                                     setSuggest(null);
                                     onBlur?.(event);
@@ -326,9 +358,15 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
                         </div>
                     </Popover.Target>
                     <Popover.Dropdown className="max-h-[260px] overflow-y-auto">
-                        <div role="listbox" id={listId} aria-label="Variables">
+                        <div
+                            role="listbox"
+                            id={listId}
+                            aria-label={suggest?.hint ? 'Suggestions' : 'Variables'}
+                        >
                             {suggestions.map((name, index) => {
-                                const definition = resolver.lookup(name);
+                                const definition = suggest?.hint
+                                    ? undefined
+                                    : resolver.lookup(name);
                                 return (
                                     <UnstyledButton
                                         key={name}
@@ -337,11 +375,18 @@ export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
                                         tabIndex={-1}
                                         onMouseDown={(event) => {
                                             event.preventDefault();
-                                            accept(name);
+                                            choose(name);
                                         }}
                                         className="flex w-full items-baseline justify-between gap-3 rounded-xs px-2 py-1 text-xs hover:bg-hover aria-selected:bg-hover"
                                     >
-                                        <span className="font-mono text-var-fg">{name}</span>
+                                        <span
+                                            className={cx(
+                                                'font-mono',
+                                                !suggest?.hint && 'text-var-fg',
+                                            )}
+                                        >
+                                            {name}
+                                        </span>
                                         <Text
                                             component="span"
                                             size="xs"

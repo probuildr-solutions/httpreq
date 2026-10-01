@@ -13,7 +13,8 @@ describe('protocol views', () => {
         for (const id of PROTOCOL_IDS) {
             const view = PROTOCOL_VIEWS[id];
             expect(view.tabs).toContain(view.defaultTab);
-            expect(view.tabs).toContain('code');
+            // Code generation is a popover on the URL bar, not a tab.
+            expect(view.tabs).not.toContain('code');
         }
     });
 

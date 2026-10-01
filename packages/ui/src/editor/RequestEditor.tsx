@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useCallback, useContext, useMemo, useRef, type Ref } from 'react';
+import { useCallback, useContext, useMemo, useRef, useState, type Ref } from 'react';
 import {
     findHeaderConflicts,
     previewGeneratedHeaders,
@@ -23,7 +23,7 @@ import {
 import { getAncestors, paramsFromUrl, urlWithParams } from '@httpreq/workspace';
 import { copyText } from '../clipboard';
 import { useCapabilities } from '../capabilities';
-import { CodePanel } from '../codegen/CodePanel';
+import { CodeGenerationButton } from '../codegen/CodeGenerationButton';
 import { emptyMqtt, useConnectionsStore } from '../connections';
 import { MqttPanel } from '../mqtt/MqttPanel';
 import { MqttContext } from '../mqtt/useMqtt';
@@ -37,6 +37,12 @@ import { usePreferences } from '../preferences';
 import { activeEnvironment, editableRequest, useWorkbenchStore, type EditorTab } from '../store';
 import { BodyPanel } from './BodyPanel';
 import { Breadcrumb } from './Breadcrumb';
+import {
+    HEADER_NAMES,
+    QUERY_PARAM_NAMES,
+    headerValueSuggestions,
+    queryValueSuggestions,
+} from './intelligence/requestHints';
 import { KeyValueTable, type LockedRow } from './KeyValueTable';
 import { OverviewPanel } from './OverviewPanel';
 import { PathVariablesTable } from './PathVariablesTable';
@@ -45,24 +51,6 @@ import { SettingsPanel } from './SettingsPanel';
 import { SharingPanel } from './SharingPanel';
 import { UrlBar, type SaveState } from './UrlBar';
 import { Tabs, cx, notifications } from '../kit';
-
-const COMMON_HEADERS = [
-    'Accept',
-    'Accept-Encoding',
-    'Accept-Language',
-    'Authorization',
-    'Cache-Control',
-    'Content-Type',
-    'Cookie',
-    'If-Match',
-    'If-None-Match',
-    'Origin',
-    'Referer',
-    'User-Agent',
-    'X-API-Key',
-    'X-Correlation-ID',
-    'X-Request-ID',
-] as const;
 
 const countEnabled = (items: KeyValueItem[]) =>
     items.filter((item) => item.enabled && item.key.trim() !== '').length;
@@ -125,6 +113,8 @@ export function RequestEditor({
     const renameNode = useWorkbenchStore((state) => state.renameNode);
     const revealNode = useWorkbenchStore((state) => state.revealNode);
     const duplicateNode = useWorkbenchStore((state) => state.duplicateNode);
+    // The code generation popover is controlled here so that Copy as cURL can open it too.
+    const [codeOpen, setCodeOpen] = useState(false);
 
     const capabilities = useCapabilities();
     const mqttApi = useContext(MqttContext);
@@ -178,9 +168,9 @@ export function RequestEditor({
 
     const copyCurl = useCallback(async () => {
         if (!request) return;
-        // cURL cannot express gRPC or MQTT: the Code tab offers the right tools for them.
+        // cURL cannot express gRPC or MQTT: code generation offers the right tools for them.
         if (protocolOf(request) === 'grpc' || protocolOf(request) === 'mqtt') {
-            setEditorTab(requestId, 'code');
+            setCodeOpen(true);
             return;
         }
         try {
@@ -193,7 +183,7 @@ export function RequestEditor({
                 message: (error as Error).message,
             });
         }
-    }, [buildCurl, request, requestId, setEditorTab]);
+    }, [buildCurl, request]);
 
     if (!request || !effectiveAuth) return null;
 
@@ -277,6 +267,13 @@ export function RequestEditor({
                 onSaveAs={onSaveAs}
                 onCopyCurl={() => void copyCurl()}
                 onDuplicate={() => duplicateNode(requestId)}
+                actions={
+                    <CodeGenerationButton
+                        request={request}
+                        open={codeOpen}
+                        onOpenChange={setCodeOpen}
+                    />
+                }
                 sendShortcut={shortcuts.send}
                 saveShortcut={shortcuts.save}
                 saveAsShortcut={shortcuts.saveAs}
@@ -332,7 +329,6 @@ export function RequestEditor({
                             )}
                         </Tabs.Tab>
                     )}
-                    {has('code') && <Tabs.Tab value="code">Code</Tabs.Tab>}
                     {has('sharing') && <Tabs.Tab value="sharing">Sharing</Tabs.Tab>}
                     {has('settings') && <Tabs.Tab value="settings">Settings</Tabs.Tab>}
                 </ScrollableTabsList>
@@ -346,11 +342,6 @@ export function RequestEditor({
                         {protocol === 'soap' && <SoapPanel request={request} onChange={onChange} />}
                         {protocol === 'grpc' && <GrpcPanel request={request} onChange={onChange} />}
                         {protocol === 'mqtt' && <MqttPanel request={request} onChange={onChange} />}
-                    </Tabs.Panel>
-                )}
-                {has('code') && (
-                    <Tabs.Panel value="code" className={cx(PANEL, 'flex flex-col')}>
-                        {tab === 'code' && <CodePanel request={request} />}
                     </Tabs.Panel>
                 )}
                 <Tabs.Panel value="overview" className={PANEL}>
@@ -370,6 +361,8 @@ export function RequestEditor({
                 <Tabs.Panel value="params" className={PANEL}>
                     <KeyValueTable
                         label="Query parameters"
+                        keyHints={QUERY_PARAM_NAMES}
+                        valueSuggestions={queryValueSuggestions}
                         items={request.params}
                         onChange={(params) =>
                             onChange({ params, url: urlWithParams(request.url, params) })
@@ -392,7 +385,8 @@ export function RequestEditor({
                         label="Headers"
                         items={request.headers}
                         onChange={(headers) => onChange({ headers })}
-                        keySuggestions={COMMON_HEADERS}
+                        keySuggestions={HEADER_NAMES}
+                        valueSuggestions={headerValueSuggestions}
                         allowSecret
                         rowNote={(item) =>
                             item.enabled ? replaced.get(item.key.trim().toLowerCase()) : undefined

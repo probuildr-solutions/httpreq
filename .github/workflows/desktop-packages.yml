@@ -11,10 +11,19 @@
 # The release is only created after every platform has built and passed its checks, so a failed
 # platform never leaves a release with missing or broken installers.
 #
-# Code signing is optional. Without these repository secrets the packages are unsigned:
+# Code signing is optional for a test build. Without these repository secrets the packages are
+# unsigned (Windows) or ad hoc signed (macOS):
 #   WIN_CSC_LINK, WIN_CSC_KEY_PASSWORD      Windows Authenticode certificate (.pfx, base64)
 #   MAC_CSC_LINK, MAC_CSC_KEY_PASSWORD      macOS Developer ID Application certificate (.p12, base64)
+#   MAC_INSTALLER_CSC_LINK, MAC_INSTALLER_CSC_KEY_PASSWORD
+#                                           macOS Developer ID Installer certificate (.p12, base64), for the .pkg
 #   APPLE_ID, APPLE_APP_SPECIFIC_PASSWORD, APPLE_TEAM_ID    macOS notarization
+#
+# A macOS package that is not Developer ID signed and notarized is met with "Apple could not verify
+# ..." the first time it is opened, in any format. So a RELEASE fails before anything is built when
+# those secrets are missing, instead of publishing installers users cannot open without a
+# workaround. To release unsigned on purpose, run the workflow by hand with allow_unsigned_mac, or
+# set the repository variable ALLOW_UNSIGNED_MAC_RELEASE to true. docs/distribution.md has the setup.
 name: Desktop packages
 
 on:
@@ -27,6 +36,10 @@ on:
         inputs:
             release:
                 description: Publish the packages as the GitHub Release v<package.json version>
+                type: boolean
+                default: false
+            allow_unsigned_mac:
+                description: Allow the release to go out with macOS packages that are not signed and notarized
                 type: boolean
                 default: false
 
@@ -107,6 +120,7 @@ jobs:
                       os: macos-latest
                       packages: |
                           apps/desktop/release/HttpReq-*.dmg
+                          apps/desktop/release/HttpReq-*.pkg
                           apps/desktop/release/HttpReq-*.zip
                           apps/desktop/release/HttpReq-*.zip.blockmap
                           apps/desktop/release/latest-mac.yml
@@ -144,6 +158,19 @@ jobs:
             - name: Install dependencies
               run: npm ci
 
+            - name: Check the macOS signing credentials
+              if: matrix.platform == 'mac'
+              run: node apps/desktop/scripts/check-mac-signing.mjs
+              env:
+                  # Which credentials exist, and whether this run is a release (which must have them).
+                  IS_RELEASE: ${{ needs.prepare.outputs.release }}
+                  ALLOW_UNSIGNED_MAC: ${{ inputs.allow_unsigned_mac || vars.ALLOW_UNSIGNED_MAC_RELEASE }}
+                  CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+                  CSC_INSTALLER_LINK: ${{ secrets.MAC_INSTALLER_CSC_LINK }}
+                  APPLE_ID: ${{ secrets.APPLE_ID }}
+                  APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+                  APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
             - name: Build and package
               # Bash on every OS so the unset loop below works on Windows too.
               shell: bash
@@ -152,6 +179,7 @@ jobs:
               # secret builds an unsigned package instead.
               run: |
                   for name in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD CSC_LINK CSC_KEY_PASSWORD \
+                    CSC_INSTALLER_LINK CSC_INSTALLER_KEY_PASSWORD \
                     APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
                     if [ -z "${!name}" ]; then unset "$name"; fi
                   done
@@ -162,6 +190,8 @@ jobs:
                   WIN_CSC_KEY_PASSWORD: ${{ matrix.platform == 'win' && secrets.WIN_CSC_KEY_PASSWORD || '' }}
                   CSC_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK || '' }}
                   CSC_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_KEY_PASSWORD || '' }}
+                  CSC_INSTALLER_LINK: ${{ matrix.platform == 'mac' && secrets.MAC_INSTALLER_CSC_LINK || '' }}
+                  CSC_INSTALLER_KEY_PASSWORD: ${{ matrix.platform == 'mac' && secrets.MAC_INSTALLER_CSC_KEY_PASSWORD || '' }}
                   CSC_IDENTITY_AUTO_DISCOVERY: ${{ matrix.platform == 'mac' && secrets.MAC_CSC_LINK != '' }}
                   APPLE_ID: ${{ matrix.platform == 'mac' && secrets.APPLE_ID || '' }}
                   APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.platform == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}

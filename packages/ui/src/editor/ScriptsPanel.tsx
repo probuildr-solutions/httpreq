@@ -97,6 +97,7 @@ export function ScriptsPanel({ request, onChange }: Props) {
                 key={stage}
                 className="min-h-40 flex-1"
                 language="javascript"
+                purpose={{ kind: 'script', stage }}
                 ariaLabel={`${SCRIPT_STAGE_LABELS[stage]} script`}
                 value={code}
                 onChange={(value) => onChange({ scripts: { ...request.scripts, [stage]: value } })}

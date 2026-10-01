@@ -43,8 +43,35 @@ else knows how a control is built.
 - **Dependency inversion.** Screens depend on interfaces (`HttpRuntime`, `WorkspaceRepository`,
   `DesktopBridge`) supplied by the host, so the same UI runs in the browser and in Electron.
 - **Patterns used on purpose:** command (menus, shortcuts), registry/strategy (auth providers and
-  editors, tone and variant tables), slice composition (the store), observer (Zustand), compound
-  components (`Menu`, `Tabs`, `Popover`, `Radio`).
+  editors, code generators, editor features, tone and variant tables), template method (HTTP code
+  generators), slice composition (the store), observer (Zustand), compound components (`Menu`,
+  `Tabs`, `Popover`, `Radio`).
+
+## Code generation popover
+
+Code generation is not a tab. The `</>` button beside Save and Send (`codegen/CodeGenerationButton`)
+opens a popover anchored to it: a compact language selector, copy, save-as-file and include
+credentials actions, and the generated code in a read-only editor with a bordered, small-radius
+frame. It closes on Escape (focus returns to the button) and on a click outside; a menu opened from
+inside it counts as inside. Opening it is controlled by the request editor, so "Copy as cURL" on a
+gRPC or MQTT request, which cURL cannot express, opens it too. The generators, the model they
+render from and the string escaping belong to `@httpreq/codegen`; the UI only lists and shows them
+(see [architecture](architecture.md#code-generation)).
+
+`Popover` (kit) takes `closeOnClickOutside` (off by default: the variable hints are anchored to an
+input) and reports why it closed, and its `Target` forwards props, so
+`<Tooltip><Popover.Target><ActionIcon/></Popover.Target></Tooltip>` works.
+
+## Editors
+
+`CodeEditor` is the one Monaco wrapper: the app's font and four-space indentation, a small corner
+radius, authoring options (bracket pairs, auto-closing, suggestions on trigger characters, Tab to
+accept) and a `purpose` (`body`, `script` with its stage, `output`) that decides which assistance
+the model gets. Read-only editors default to `output`. The assistance itself, and what it needs to
+be published from the app root, is described in [architecture](architecture.md#editor-intelligence).
+A new kind of assistance is a new `EditorFeature` file and one line in
+`editor/intelligence/index.ts`; a new header or parameter hint is a line in
+`editor/intelligence/requestHints.ts`.
 
 ## Conventions
 
