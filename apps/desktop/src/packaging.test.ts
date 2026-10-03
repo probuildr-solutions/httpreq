@@ -131,7 +131,7 @@ interface Config {
         entitlements: string;
         entitlementsInherit: string;
     };
-    dmg: { sign: boolean };
+    dmg?: unknown;
     pkg: Record<string, unknown>;
     electronFuses: Record<string, boolean>;
     afterSign: unknown;
@@ -155,9 +155,11 @@ const loadConfig = (env: Record<string, string>): Config => {
 };
 
 describe('the electron-builder configuration', () => {
-    it('builds a dmg, a pkg and an updater zip for Intel and Apple silicon', () => {
+    it('builds a pkg and an updater zip for Intel and Apple silicon, and no disk image', () => {
         const { target } = loadConfig({}).mac;
-        for (const kind of ['dmg', 'pkg', 'zip']) {
+        expect(target.map((entry) => entry.target).sort()).toEqual(['pkg', 'zip']);
+        expect(loadConfig({}).dmg).toBeUndefined();
+        for (const kind of ['pkg', 'zip']) {
             expect(target.find((entry) => entry.target === kind)?.arch, kind).toEqual([
                 'x64',
                 'arm64',
@@ -197,10 +199,6 @@ describe('the electron-builder configuration', () => {
             enableEmbeddedAsarIntegrityValidation: true,
             onlyLoadAppFromAsar: true,
         });
-    });
-
-    it('does not sign the disk image, whose checksum is recorded for the updater metadata', () => {
-        expect(loadConfig({}).dmg.sign).toBe(false);
     });
 
     it('installs the pkg into /Applications for the whole Mac and upgrades in place', () => {

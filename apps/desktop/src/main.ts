@@ -39,6 +39,8 @@ import {
     isDevToolsAllowed,
     lockDownWebContents,
 } from './security';
+import { registerDbConnections } from './dbConnections';
+import { registerDbStudio } from './dbstudio';
 import { registerServices } from './services';
 import { createUpdateController, loadElectronUpdater, supportsSelfUpdate } from './updater';
 import { loadWindowState, resolveWindowBounds, saveWindowState } from './windowState';
@@ -261,6 +263,21 @@ ipcMain.handle('clipboard:read-text', async (event): Promise<string> =>
  */
 const services = registerServices({ isTrustedSender });
 
+/** Database Studio's large-file tools; the heavy work runs in the isolated File Host process. */
+const dbStudio = registerDbStudio({
+    isTrustedSender,
+    fileHostPath: join(currentDir, 'fileHost.js'),
+});
+
+/** Database Studio's connections and statements; they run in their own isolated host process. */
+const dbConnections = registerDbConnections({
+    isTrustedSender,
+    hostPath: join(currentDir, 'dbHost.js'),
+    userDataPath: app.getPath('userData'),
+    credentials: services.credentials,
+    pathOfFile: dbStudio.pathOfFile,
+});
+
 /*
  * Background updates. A failure here only ever becomes an `error` state shown to the user: the
  * installed version keeps starting and running whatever the update feed does.
@@ -278,7 +295,7 @@ const updates = createUpdateController({
     // below is told not to hold the quit again.
     prepareInstall: async () => {
         shuttingDown = true;
-        await services.disposeAll();
+        await Promise.all([services.disposeAll(), dbStudio.dispose(), dbConnections.dispose()]);
     },
 });
 
@@ -368,7 +385,11 @@ const createWindow = async () => {
 
     // Sockets and shells belong to the window that opened them and die with it.
     const senderId = window.webContents.id;
-    window.webContents.on('destroyed', () => services.releaseSender(senderId));
+    window.webContents.on('destroyed', () => {
+        services.releaseSender(senderId);
+        dbStudio.releaseSender(senderId);
+        dbConnections.releaseSender(senderId);
+    });
 
     lockDownWebContents(window.webContents, { devServer, devToolsAllowed });
     if (devServer) await window.loadURL(devServer);
@@ -412,7 +433,9 @@ app.on('before-quit', (event) => {
     if (shuttingDown) return;
     event.preventDefault();
     shuttingDown = true;
-    void services.disposeAll().finally(() => app.quit());
+    void Promise.all([services.disposeAll(), dbStudio.dispose(), dbConnections.dispose()]).finally(
+        () => app.quit(),
+    );
 });
 
 app.on('window-all-closed', () => {

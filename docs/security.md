@@ -66,7 +66,7 @@ node apps/desktop/scripts/verify-packages.mjs win   # or mac / linux
 ```
 
 On macOS this also asks the system whether it would trust each package: the code signature of the app
-inside every `.zip`, `.dmg` and `.pkg` (and that the arm64 build contains arm64 code), the hardened
+inside every `.zip` and `.pkg` (and that the arm64 build contains arm64 code), the hardened
 runtime and the JIT entitlement, Gatekeeper's verdict, the stapled notarization ticket, and the
 installer's own signature. A Developer ID signature and notarization are what make macOS trust a
 download; they cannot be replaced by a packaging option, and a release that lacks them fails before it

@@ -25,6 +25,9 @@ import 'monaco-editor/esm/vs/basic-languages/python/python.contribution';
 import 'monaco-editor/esm/vs/basic-languages/ruby/ruby.contribution';
 import 'monaco-editor/esm/vs/basic-languages/shell/shell.contribution';
 import 'monaco-editor/esm/vs/basic-languages/swift/swift.contribution';
+// SQL dialects, for Database Studio's file editor.
+import 'monaco-editor/esm/vs/basic-languages/mysql/mysql.contribution';
+import 'monaco-editor/esm/vs/basic-languages/pgsql/pgsql.contribution';
 import 'monaco-editor/esm/vs/basic-languages/typescript/typescript.contribution';
 import { registerEditorIntelligence } from './editor/intelligence';
 

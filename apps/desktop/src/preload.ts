@@ -5,10 +5,18 @@
 
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import {
+    isDbFileProgress,
+    isDbEditProgress,
+    isDbHostEvent,
+    isDbHostStatus,
+    isDbItemsProgress,
+    isDbSearchHits,
+    isDbSearchProgress,
     isDesktopUpdateState,
     isMenuCommand,
     isMqttStatus,
     isSshStatus,
+    type DbStudioBridge,
     type DesktopBridge,
     type DesktopWindowState,
     type GrpcBridge,
@@ -204,6 +212,44 @@ const tunnels: TunnelBridge = {
     onStateChange: (listener) => subscribe('tunnel:state', listener, isTunnelState),
 };
 
+const dbStudio: DbStudioBridge = {
+    getStatus: () => ipcRenderer.invoke('dbstudio:status'),
+    pickFile: () => ipcRenderer.invoke('dbstudio:file:pick'),
+    openFile: (token) => ipcRenderer.invoke('dbstudio:file:open', token),
+    readLines: (fileId, from, count) =>
+        ipcRenderer.invoke('dbstudio:file:lines', fileId, from, count),
+    closeFile: (fileId) => ipcRenderer.invoke('dbstudio:file:close', fileId),
+    onFileProgress: (listener) => subscribe('dbstudio:file-progress', listener, isDbFileProgress),
+    onHostStatus: (listener) => subscribe('dbstudio:host-status', listener, isDbHostStatus),
+    analyzeFile: (fileId, format) => ipcRenderer.invoke('dbstudio:items:analyze', fileId, format),
+    listItems: (fileId, from, count) =>
+        ipcRenderer.invoke('dbstudio:items:list', fileId, from, count),
+    readItem: (fileId, index) => ipcRenderer.invoke('dbstudio:items:read', fileId, index),
+    itemAt: (fileId, offset) => ipcRenderer.invoke('dbstudio:items:at', fileId, offset),
+    startSearch: (fileId, searchId, query, maxHits) =>
+        ipcRenderer.invoke('dbstudio:search:start', fileId, searchId, query, maxHits),
+    cancelSearch: (searchId) => ipcRenderer.invoke('dbstudio:search:cancel', searchId),
+    dbRequest: (op, payload) => ipcRenderer.invoke('dbstudio:db:request', op, payload),
+    onDbEvent: (listener) => subscribe('dbstudio:db-event', listener, isDbHostEvent),
+    setDbPassword: (profileId, password) =>
+        ipcRenderer.invoke('dbstudio:db:set-password', profileId, password),
+    hasDbPassword: (profileId) => ipcRenderer.invoke('dbstudio:db:has-password', profileId),
+    deleteDbPassword: (profileId) => ipcRenderer.invoke('dbstudio:db:delete-password', profileId),
+    readText: (fileId) => ipcRenderer.invoke('dbstudio:edit:read-text', fileId),
+    saveFile: (fileId, pieces, eol) =>
+        ipcRenderer.invoke('dbstudio:edit:save', fileId, pieces, eol),
+    saveFileAs: (fileId, pieces, eol) =>
+        ipcRenderer.invoke('dbstudio:edit:save-as', fileId, pieces, eol),
+    replaceAll: (fileId, query, replacement) =>
+        ipcRenderer.invoke('dbstudio:edit:replace-all', fileId, query, replacement),
+    onEditProgress: (listener) => subscribe('dbstudio:edit-progress', listener, isDbEditProgress),
+    onItemsProgress: (listener) =>
+        subscribe('dbstudio:items-progress', listener, isDbItemsProgress),
+    onSearchHits: (listener) => subscribe('dbstudio:search-hits', listener, isDbSearchHits),
+    onSearchProgress: (listener) =>
+        subscribe('dbstudio:search-progress', listener, isDbSearchProgress),
+};
+
 const bridge: HttpReqBridge = {
     executeHttp: (request, executionId) => ipcRenderer.invoke('http:execute', request, executionId),
     cancelHttp: (executionId) => ipcRenderer.send('http:cancel', executionId),
@@ -214,6 +260,7 @@ const bridge: HttpReqBridge = {
     mqtt,
     ssh,
     tunnels,
+    dbStudio,
 };
 
 contextBridge.exposeInMainWorld('httpreq', bridge);

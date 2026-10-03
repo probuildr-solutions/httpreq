@@ -68,7 +68,7 @@ npm run build
 npm run start --workspace=@httpreq/desktop
 ```
 
-To create installers with electron-builder (NSIS `.exe` on Windows, `.dmg`, `.pkg` and `.zip` for Intel and Apple silicon on macOS, `.AppImage`/`.deb` on Linux; build on the target OS), run:
+To create installers with electron-builder (NSIS `.exe` on Windows, `.pkg` and `.zip` for Intel and Apple silicon on macOS, `.AppImage`/`.deb` on Linux; build on the target OS), run:
 
 ```bash
 npm run package:desktop
@@ -100,7 +100,7 @@ A failed check, download or install only shows a message; the installed version 
 
 ### Opening the macOS app
 
-Install from the `.dmg` (drag to Applications) or the `.pkg` (double-click; or `sudo installer -pkg HttpReq-<version>-mac-<arch>.pkg -target /`). Without a Developer ID certificate the macOS builds are signed ad hoc. That keeps the Apple silicon (arm64) app valid, so macOS no longer reports it as _damaged_, but it is not notarized, so the first launch shows "Apple could not verify "HttpReq" is free of malware": choose **Done**, open **System Settings › Privacy & Security** and choose **Open Anyway**. If macOS still refuses a quarantined download, `xattr -dr com.apple.quarantine /Applications/HttpReq.app` clears the flag. Only a Developer ID signed, notarized and stapled build opens with no prompt at all, and no packaging option replaces that; see [docs/distribution.md](docs/distribution.md). The packaging job checks the signature, Gatekeeper acceptance and notarization ticket of every app and installer it builds.
+Install from the `.pkg` (double-click; or `sudo installer -pkg HttpReq-<version>-mac-<arch>.pkg -target /`). Without a Developer ID certificate the macOS builds are signed ad hoc. That keeps the Apple silicon (arm64) app valid, so macOS no longer reports it as _damaged_, but it is not notarized, so the first launch shows "Apple could not verify "HttpReq" is free of malware": choose **Done**, open **System Settings › Privacy & Security** and choose **Open Anyway**. If macOS still refuses a quarantined download, `xattr -dr com.apple.quarantine /Applications/HttpReq.app` clears the flag. Only a Developer ID signed, notarized and stapled build opens with no prompt at all, and no packaging option replaces that; see [docs/distribution.md](docs/distribution.md). The packaging job checks the signature, Gatekeeper acceptance and notarization ticket of every app and installer it builds.
 
 ## Workspaces
 

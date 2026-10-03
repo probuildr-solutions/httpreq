@@ -2,5 +2,16 @@
     "extends": "../../tsconfig.base.json",
     "compilerOptions": { "composite": true, "noEmit": true, "types": ["node"] },
     "include": ["src", "vite.*.config.ts"],
-    "references": [{ "path": "../../packages/api-client" }, { "path": "../../packages/shared" }]
+    "references": [
+        { "path": "../../packages/api-client" },
+        { "path": "../../packages/shared" },
+        { "path": "../../packages/db-core" },
+        { "path": "../../packages/db-workers" },
+        { "path": "../../packages/db-host" },
+        { "path": "../../packages/mysql-engine" },
+        { "path": "../../packages/postgres-engine" },
+        { "path": "../../packages/mongo-engine" },
+        { "path": "../../packages/redis-engine" },
+        { "path": "../../packages/file-engine" }
+    ]
 }

@@ -69,6 +69,11 @@ import { SshContext, useSshManager } from './ssh/useSsh';
 import { StatusBar } from './StatusBar';
 import { activeEnvironment, editableRequest, requestKind, useWorkbenchStore } from './store';
 import { TitleBar } from './TitleBar';
+import { StudioWorkspace } from './dbstudio/StudioWorkspace';
+import { useStudioStore } from './dbstudio/studioStore';
+import { DbManagerContext, useDbManagerState } from './dbstudio/db/useDbManager';
+import { isQueryTabId } from './dbstudio/db/queryStore';
+import { DbStudioContext, useDbStudioManager } from './dbstudio/useDbStudio';
 import { TunnelContext, useTunnelManager } from './tunnels/useTunnels';
 import { usePersistence } from './usePersistence';
 import { useRequestExecution } from './useRequestExecution';
@@ -171,9 +176,17 @@ export function HttpReqApp({
     const protocolServices = useMemo(() => createProtocolServices(runtime), [runtime]);
     const ssh = useSshManager(capabilities.ssh ? bridge?.ssh : undefined);
     const tunnels = useTunnelManager(capabilities.tunneling ? bridge?.tunnels : undefined);
+    const dbStudioBridge = capabilities.databaseStudio ? bridge?.dbStudio : undefined;
+    const dbStudio = useDbStudioManager(dbStudioBridge);
+    const dbManager = useDbManagerState(dbStudioBridge);
 
     const workspaceName = useWorkbenchStore((state) => state.workspace.name);
     const activeSshId = useWorkbenchStore((state) => state.activeSshSessionId);
+    // Database Studio takes over the main area while its sidebar view is open. The request area
+    // below is hidden, not unmounted, so terminals and sockets keep running.
+    const studioActive =
+        useWorkbenchStore((state) => state.sidebarView) === 'dbstudio' &&
+        capabilities.databaseStudio;
     const activeEnvironmentTabId = useWorkbenchStore((state) => state.activeEnvironmentTabId);
     const setActiveEnvironmentTab = useWorkbenchStore((state) => state.setActiveEnvironmentTab);
     const moveEnvironmentTab = useWorkbenchStore((state) => state.moveEnvironmentTab);
@@ -440,6 +453,21 @@ export function HttpReqApp({
     const tabCount = tabs.length;
     const httpTabActive = activeKind === 'request';
     const requestTabActive = activeKind === 'request' || activeKind === 'websocket';
+    const studioHasTab = useStudioStore((state) => state.activeId !== null);
+    const studioCommands = useMemo(() => {
+        const withActive = (run: (id: string) => unknown) => () => {
+            const id = useStudioStore.getState().activeId;
+            if (id) void run(id);
+        };
+        return {
+            hasTab: studioHasTab,
+            save: withActive(dbStudio.save),
+            saveAs: withActive(dbStudio.saveAs),
+            close: withActive((id) =>
+                isQueryTabId(id) ? dbManager.closeQuery(id) : dbStudio.closeTab(id),
+            ),
+        };
+    }, [studioHasTab, dbStudio, dbManager]);
     const commands = useMemo<CommandMap>(
         () =>
             buildCommands({
@@ -447,8 +475,9 @@ export function HttpReqApp({
                 mac,
                 urlRef,
                 tabCount,
-                httpTabActive,
-                requestTabActive,
+                // The request area is hidden while Database Studio is in front.
+                httpTabActive: httpTabActive && !studioActive,
+                requestTabActive: requestTabActive && !studioActive,
                 responsePosition,
                 sidebarVisible,
                 statusBarVisible,
@@ -469,6 +498,7 @@ export function HttpReqApp({
                 openDocumentation,
                 checkUpdatesNow,
                 openDialog: setDialog,
+                studio: studioActive ? studioCommands : undefined,
             }),
         [
             desktop,
@@ -495,6 +525,8 @@ export function HttpReqApp({
             toggleStatusBar,
             openDocumentation,
             checkUpdatesNow,
+            studioActive,
+            studioCommands,
         ],
     );
 
@@ -576,213 +608,260 @@ export function HttpReqApp({
                             <WebSocketContext.Provider value={sockets}>
                                 <SshContext.Provider value={ssh}>
                                     <TunnelContext.Provider value={tunnels}>
-                                        <AppShell
-                                            headerHeight={TITLE_BAR_HEIGHT + SECONDARY_BAR_HEIGHT}
-                                            navbarWidth={sidebarWidth}
-                                            navbarVisible={sidebarVisible}
-                                            navbarOpen={opened}
-                                            footerHeight={STATUS_BAR_HEIGHT}
-                                            header={
-                                                <>
-                                                    <div style={{ height: TITLE_BAR_HEIGHT }}>
-                                                        <TitleBar
-                                                            // The workspace menu lives in the row below, so the title bar's own text
-                                                            // is just whatever tab is open.
-                                                            title={activeName ?? ''}
-                                                            menus={APP_MENUS}
-                                                            commands={commands}
-                                                            mac={mac}
-                                                            desktop={desktop}
-                                                            mobileNavOpened={opened}
-                                                            onToggleMobileNav={toggle}
+                                        <DbStudioContext.Provider value={dbStudio}>
+                                            <DbManagerContext.Provider value={dbManager}>
+                                                <AppShell
+                                                    headerHeight={
+                                                        TITLE_BAR_HEIGHT + SECONDARY_BAR_HEIGHT
+                                                    }
+                                                    navbarWidth={sidebarWidth}
+                                                    navbarVisible={sidebarVisible}
+                                                    navbarOpen={opened}
+                                                    footerHeight={STATUS_BAR_HEIGHT}
+                                                    header={
+                                                        <>
+                                                            <div
+                                                                style={{ height: TITLE_BAR_HEIGHT }}
+                                                            >
+                                                                <TitleBar
+                                                                    // The workspace menu lives in the row below, so the title bar's own text
+                                                                    // is just whatever tab is open.
+                                                                    title={activeName ?? ''}
+                                                                    menus={APP_MENUS}
+                                                                    commands={commands}
+                                                                    mac={mac}
+                                                                    desktop={desktop}
+                                                                    mobileNavOpened={opened}
+                                                                    onToggleMobileNav={toggle}
+                                                                />
+                                                            </div>
+                                                            <div
+                                                                style={{
+                                                                    height: SECONDARY_BAR_HEIGHT,
+                                                                }}
+                                                            >
+                                                                <SecondaryBar
+                                                                    toggleSidebar={
+                                                                        commands[
+                                                                            'view.toggle-sidebar'
+                                                                        ]
+                                                                    }
+                                                                    sidebarVisible={sidebarVisible}
+                                                                >
+                                                                    <WorkspaceSwitcher
+                                                                        actions={workspaceActions}
+                                                                        releaseConnections={
+                                                                            releaseConnections
+                                                                        }
+                                                                    />
+                                                                </SecondaryBar>
+                                                            </div>
+                                                        </>
+                                                    }
+                                                    navbar={
+                                                        <Sidebar
+                                                            onClearHistory={clearHistory}
+                                                            onRemoveHistory={removeHistory}
+                                                            onNavigate={closeNav}
                                                         />
-                                                    </div>
-                                                    <div style={{ height: SECONDARY_BAR_HEIGHT }}>
-                                                        <SecondaryBar
-                                                            toggleSidebar={
-                                                                commands['view.toggle-sidebar']
-                                                            }
-                                                            sidebarVisible={sidebarVisible}
-                                                        >
-                                                            <WorkspaceSwitcher
-                                                                actions={workspaceActions}
-                                                                releaseConnections={
-                                                                    releaseConnections
+                                                    }
+                                                    footer={
+                                                        statusBarVisible ? (
+                                                            <StatusBar
+                                                                workspaceName={workspaceName}
+                                                                runtimeLabel={
+                                                                    desktop ? 'Desktop' : 'Browser'
                                                                 }
+                                                                version={version}
+                                                                sending={sending}
+                                                                onResetZoom={resetZoom}
+                                                                zoomed={zoomed}
+                                                                onApplyUpdate={applyUpdate}
                                                             />
-                                                        </SecondaryBar>
-                                                    </div>
-                                                </>
-                                            }
-                                            navbar={
-                                                <Sidebar
-                                                    onClearHistory={clearHistory}
-                                                    onRemoveHistory={removeHistory}
-                                                    onNavigate={closeNav}
-                                                />
-                                            }
-                                            footer={
-                                                statusBarVisible ? (
-                                                    <StatusBar
-                                                        workspaceName={workspaceName}
-                                                        runtimeLabel={
-                                                            desktop ? 'Desktop' : 'Browser'
-                                                        }
-                                                        version={version}
-                                                        sending={sending}
-                                                        onResetZoom={resetZoom}
-                                                        zoomed={zoomed}
-                                                        onApplyUpdate={applyUpdate}
-                                                    />
-                                                ) : undefined
-                                            }
-                                        >
-                                            <WorkbenchTabs
-                                                tabs={tabs}
-                                                activeId={activeTabId}
-                                                onActivate={activateTab}
-                                                onClose={onCloseTab}
-                                                onCloseMany={onCloseTabs}
-                                                onNew={newRequest}
-                                                onMove={moveTabAnyKind}
-                                                newShortcut={shortcutLabel('request.new')}
-                                                closeShortcut={shortcutLabel('request.close')}
-                                                actions={tabActions}
-                                            />
-
-                                            {/*
-                                             * Every open terminal stays mounted and is merely hidden when its tab is not
-                                             * the active one. A terminal is a live screen, not a view of stored data:
-                                             * unmounting it would dispose the xterm instance and destroy the scrollback,
-                                             * the prompt and whatever full-screen program is running, so coming back to a
-                                             * still-connected session would show an empty pane.
-                                             */}
-                                            {sshTabs.map((tab) => {
-                                                const active = tab.id === activeSshId;
-                                                return (
+                                                        ) : undefined
+                                                    }
+                                                >
+                                                    {studioActive && <StudioWorkspace />}
                                                     <div
-                                                        key={tab.id}
-                                                        role="tabpanel"
-                                                        id={active ? REQUEST_PANEL_ID : undefined}
-                                                        aria-labelledby={requestTabId(tab.id)}
-                                                        className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
-                                                        hidden={!active}
+                                                        hidden={studioActive}
+                                                        className="flex min-h-0 min-w-0 flex-1 flex-col [&[hidden]]:hidden"
                                                     >
-                                                        <SshTerminal sessionId={tab.id} />
-                                                    </div>
-                                                );
-                                            })}
+                                                        <WorkbenchTabs
+                                                            tabs={tabs}
+                                                            activeId={activeTabId}
+                                                            onActivate={activateTab}
+                                                            onClose={onCloseTab}
+                                                            onCloseMany={onCloseTabs}
+                                                            onNew={newRequest}
+                                                            onMove={moveTabAnyKind}
+                                                            newShortcut={shortcutLabel(
+                                                                'request.new',
+                                                            )}
+                                                            closeShortcut={shortcutLabel(
+                                                                'request.close',
+                                                            )}
+                                                            actions={tabActions}
+                                                        />
 
-                                            {activeSshId &&
-                                            sshTabs.some(
-                                                (tab) => tab.id === activeSshId,
-                                            ) ? null : activeKind === 'environment' &&
-                                              activeEnvironmentTabId ? (
-                                                <div
-                                                    role="tabpanel"
-                                                    id={REQUEST_PANEL_ID}
-                                                    aria-labelledby={requestTabId(
-                                                        activeEnvironmentTabId,
-                                                    )}
-                                                    className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
-                                                >
-                                                    <EnvironmentEditor
-                                                        key={activeEnvironmentTabId}
-                                                        environmentId={activeEnvironmentTabId}
-                                                    />
-                                                </div>
-                                            ) : activeKind === 'websocket' && activeId ? (
-                                                <div
-                                                    role="tabpanel"
-                                                    id={REQUEST_PANEL_ID}
-                                                    aria-labelledby={requestTabId(activeId)}
-                                                    className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
-                                                >
-                                                    <WebSocketEditor
-                                                        key={activeId}
-                                                        requestId={activeId}
-                                                        onSave={() => void saveActive()}
-                                                        onSaveAs={saveActiveAs}
-                                                        shortcuts={{
-                                                            save: shortcutLabel('request.save'),
-                                                            saveAs: shortcutLabel(
-                                                                'request.save-as',
-                                                            ),
-                                                        }}
-                                                    />
-                                                </div>
-                                            ) : activeId &&
-                                              tabs.some((tab) => tab.id === activeId) ? (
-                                                <div
-                                                    role="tabpanel"
-                                                    id={REQUEST_PANEL_ID}
-                                                    aria-labelledby={requestTabId(activeId)}
-                                                    className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
-                                                >
-                                                    {activeProtocol === 'mqtt' ? (
-                                                        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                                                            {requestEditor}
-                                                        </div>
-                                                    ) : (
-                                                        <WorkbenchSplit
-                                                            ref={responseRef}
-                                                            requestId="request-editor"
-                                                            labels={{
-                                                                request: 'Request',
-                                                                response: 'Response',
-                                                            }}
-                                                            splitterLabel="Resize request and response panels"
-                                                            busy={sending}
-                                                            request={requestEditor}
-                                                            response={
-                                                                <ActiveResponse
-                                                                    requestId={activeId}
-                                                                    loading={sending}
-                                                                    onStop={() =>
-                                                                        execution.cancel(activeId)
+                                                        {/*
+                                                         * Every open terminal stays mounted and is merely hidden when its tab is not
+                                                         * the active one. A terminal is a live screen, not a view of stored data:
+                                                         * unmounting it would dispose the xterm instance and destroy the scrollback,
+                                                         * the prompt and whatever full-screen program is running, so coming back to a
+                                                         * still-connected session would show an empty pane.
+                                                         */}
+                                                        {sshTabs.map((tab) => {
+                                                            const active = tab.id === activeSshId;
+                                                            return (
+                                                                <div
+                                                                    key={tab.id}
+                                                                    role="tabpanel"
+                                                                    id={
+                                                                        active
+                                                                            ? REQUEST_PANEL_ID
+                                                                            : undefined
+                                                                    }
+                                                                    aria-labelledby={requestTabId(
+                                                                        tab.id,
+                                                                    )}
+                                                                    className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
+                                                                    hidden={!active}
+                                                                >
+                                                                    <SshTerminal
+                                                                        sessionId={tab.id}
+                                                                    />
+                                                                </div>
+                                                            );
+                                                        })}
+
+                                                        {activeSshId &&
+                                                        sshTabs.some(
+                                                            (tab) => tab.id === activeSshId,
+                                                        ) ? null : activeKind === 'environment' &&
+                                                          activeEnvironmentTabId ? (
+                                                            <div
+                                                                role="tabpanel"
+                                                                id={REQUEST_PANEL_ID}
+                                                                aria-labelledby={requestTabId(
+                                                                    activeEnvironmentTabId,
+                                                                )}
+                                                                className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
+                                                            >
+                                                                <EnvironmentEditor
+                                                                    key={activeEnvironmentTabId}
+                                                                    environmentId={
+                                                                        activeEnvironmentTabId
                                                                     }
                                                                 />
-                                                            }
-                                                        />
-                                                    )}
-                                                </div>
-                                            ) : (
-                                                <EmptyWorkspace
-                                                    onNewRequest={newRequest}
-                                                    onNewWebSocket={newWebSocket}
-                                                    onNewCollection={() => createCollection()}
-                                                />
-                                            )}
-                                        </AppShell>
+                                                            </div>
+                                                        ) : activeKind === 'websocket' &&
+                                                          activeId ? (
+                                                            <div
+                                                                role="tabpanel"
+                                                                id={REQUEST_PANEL_ID}
+                                                                aria-labelledby={requestTabId(
+                                                                    activeId,
+                                                                )}
+                                                                className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
+                                                            >
+                                                                <WebSocketEditor
+                                                                    key={activeId}
+                                                                    requestId={activeId}
+                                                                    onSave={() => void saveActive()}
+                                                                    onSaveAs={saveActiveAs}
+                                                                    shortcuts={{
+                                                                        save: shortcutLabel(
+                                                                            'request.save',
+                                                                        ),
+                                                                        saveAs: shortcutLabel(
+                                                                            'request.save-as',
+                                                                        ),
+                                                                    }}
+                                                                />
+                                                            </div>
+                                                        ) : activeId &&
+                                                          tabs.some(
+                                                              (tab) => tab.id === activeId,
+                                                          ) ? (
+                                                            <div
+                                                                role="tabpanel"
+                                                                id={REQUEST_PANEL_ID}
+                                                                aria-labelledby={requestTabId(
+                                                                    activeId,
+                                                                )}
+                                                                className="flex min-h-0 min-w-0 flex-1 [&[hidden]]:hidden"
+                                                            >
+                                                                {activeProtocol === 'mqtt' ? (
+                                                                    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+                                                                        {requestEditor}
+                                                                    </div>
+                                                                ) : (
+                                                                    <WorkbenchSplit
+                                                                        ref={responseRef}
+                                                                        requestId="request-editor"
+                                                                        labels={{
+                                                                            request: 'Request',
+                                                                            response: 'Response',
+                                                                        }}
+                                                                        splitterLabel="Resize request and response panels"
+                                                                        busy={sending}
+                                                                        request={requestEditor}
+                                                                        response={
+                                                                            <ActiveResponse
+                                                                                requestId={activeId}
+                                                                                loading={sending}
+                                                                                onStop={() =>
+                                                                                    execution.cancel(
+                                                                                        activeId,
+                                                                                    )
+                                                                                }
+                                                                            />
+                                                                        }
+                                                                    />
+                                                                )}
+                                                            </div>
+                                                        ) : (
+                                                            <EmptyWorkspace
+                                                                onNewRequest={newRequest}
+                                                                onNewWebSocket={newWebSocket}
+                                                                onNewCollection={() =>
+                                                                    createCollection()
+                                                                }
+                                                            />
+                                                        )}
+                                                    </div>
+                                                </AppShell>
 
-                                        <SettingsDialog
-                                            opened={dialog === 'settings'}
-                                            onClose={() => setDialog(null)}
-                                        />
-                                        <ShortcutsDialog
-                                            opened={dialog === 'shortcuts'}
-                                            onClose={() => setDialog(null)}
-                                            commands={commands}
-                                            mac={mac}
-                                            web={!desktop}
-                                        />
-                                        <AboutDialog
-                                            opened={dialog === 'about'}
-                                            onClose={() => setDialog(null)}
-                                            version={version}
-                                            build={build}
-                                            desktop={desktop}
-                                            onOpenDocumentation={openDocumentation}
-                                            onCheckForUpdates={
-                                                updateCheck ? checkUpdatesNow : undefined
-                                            }
-                                            onApplyUpdate={applyUpdate}
-                                        />
-                                        <ImportDialog />
-                                        <ExportDialog />
-                                        <SaveAsDialog onSaveAs={saveAs} />
-                                        <ConfirmDialog />
-                                        <HostKeyDialog />
+                                                <SettingsDialog
+                                                    opened={dialog === 'settings'}
+                                                    onClose={() => setDialog(null)}
+                                                />
+                                                <ShortcutsDialog
+                                                    opened={dialog === 'shortcuts'}
+                                                    onClose={() => setDialog(null)}
+                                                    commands={commands}
+                                                    mac={mac}
+                                                    web={!desktop}
+                                                />
+                                                <AboutDialog
+                                                    opened={dialog === 'about'}
+                                                    onClose={() => setDialog(null)}
+                                                    version={version}
+                                                    build={build}
+                                                    desktop={desktop}
+                                                    onOpenDocumentation={openDocumentation}
+                                                    onCheckForUpdates={
+                                                        updateCheck ? checkUpdatesNow : undefined
+                                                    }
+                                                    onApplyUpdate={applyUpdate}
+                                                />
+                                                <ImportDialog />
+                                                <ExportDialog />
+                                                <SaveAsDialog onSaveAs={saveAs} />
+                                                <ConfirmDialog />
+                                                <HostKeyDialog />
+                                            </DbManagerContext.Provider>
+                                        </DbStudioContext.Provider>
                                     </TunnelContext.Provider>
                                 </SshContext.Provider>
                             </WebSocketContext.Provider>

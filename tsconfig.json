@@ -5,6 +5,66 @@
             "path": "packages/shared"
         },
         {
+            "path": "packages/db-core"
+        },
+        {
+            "path": "packages/streaming-engine"
+        },
+        {
+            "path": "packages/file-engine"
+        },
+        {
+            "path": "packages/db-workers"
+        },
+        {
+            "path": "packages/sql-parser"
+        },
+        {
+            "path": "packages/document-engine"
+        },
+        {
+            "path": "packages/editor-core"
+        },
+        {
+            "path": "packages/db-protocol-mysql"
+        },
+        {
+            "path": "packages/mysql-engine"
+        },
+        {
+            "path": "packages/result-engine"
+        },
+        {
+            "path": "packages/query-engine"
+        },
+        {
+            "path": "packages/connection-manager"
+        },
+        {
+            "path": "packages/db-host"
+        },
+        {
+            "path": "packages/postgres-engine"
+        },
+        {
+            "path": "packages/db-protocol-postgres"
+        },
+        {
+            "path": "packages/mongo-engine"
+        },
+        {
+            "path": "packages/db-protocol-mongo"
+        },
+        {
+            "path": "packages/redis-engine"
+        },
+        {
+            "path": "packages/db-protocol-redis"
+        },
+        {
+            "path": "packages/test-servers"
+        },
+        {
             "path": "packages/api-client"
         },
         {

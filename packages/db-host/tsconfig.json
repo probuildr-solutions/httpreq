@@ -1,0 +1,45 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "composite": true,
+        "declaration": true,
+        "emitDeclarationOnly": true,
+        "outDir": "dist-types"
+    },
+    "include": ["src"],
+    "references": [
+        {
+            "path": "../db-core"
+        },
+        {
+            "path": "../connection-manager"
+        },
+        {
+            "path": "../query-engine"
+        },
+        {
+            "path": "../result-engine"
+        },
+        {
+            "path": "../file-engine"
+        },
+        {
+            "path": "../sql-parser"
+        },
+        {
+            "path": "../mysql-engine"
+        },
+        {
+            "path": "../redis-engine"
+        },
+        {
+            "path": "../mongo-engine"
+        },
+        {
+            "path": "../postgres-engine"
+        },
+        {
+            "path": "../test-servers"
+        }
+    ]
+}

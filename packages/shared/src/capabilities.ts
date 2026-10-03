@@ -22,6 +22,8 @@ export interface PlatformCapabilities {
     grpc: boolean;
     /** MQTT over TCP/TLS likewise. */
     mqtt: boolean;
+    /** Database Studio: large-file tools and database connections, which need native processes. */
+    databaseStudio: boolean;
 }
 
 export const WEB_CAPABILITIES: PlatformCapabilities = {
@@ -33,6 +35,7 @@ export const WEB_CAPABILITIES: PlatformCapabilities = {
     webSocketHeaders: false,
     grpc: false,
     mqtt: false,
+    databaseStudio: false,
 };
 
 export const DESKTOP_CAPABILITIES: PlatformCapabilities = {
@@ -44,6 +47,7 @@ export const DESKTOP_CAPABILITIES: PlatformCapabilities = {
     webSocketHeaders: true,
     grpc: true,
     mqtt: true,
+    databaseStudio: true,
 };
 
 /**
@@ -59,6 +63,7 @@ export const detectCapabilities = (
               webSocket?: unknown;
               grpc?: unknown;
               mqtt?: unknown;
+              dbStudio?: unknown;
           }
         | undefined,
 ): PlatformCapabilities => {
@@ -72,5 +77,6 @@ export const detectCapabilities = (
         webSocketHeaders: !!bridge.webSocket,
         grpc: !!bridge.grpc,
         mqtt: !!bridge.mqtt,
+        databaseStudio: !!bridge.dbStudio,
     };
 };

@@ -44,6 +44,7 @@ Authorization is a provider registry. Each scheme (`none`, `inherit`, API key, B
 - `codegen`: the generator registry, the request-to-generator input builder with secret redaction, and the generators.
 - `workspace`: workspace construction, migration and normalization, URL/params sync, whole-workspace operations, and pure tree operations (rename, move, duplicate, delete).
 - `storage`: the `KeyValueStore` abstraction (IndexedDB, web storage, memory) and one repository implementation on top of it.
+- `db-core`, `streaming-engine`, `file-engine`, `db-workers`: the Database Studio foundation (large-file reading, indexing and isolated workers). They depend only on each other in one direction and never on Electron or the UI; see [database-studio.md](database-studio.md), which also lists the lint rules that enforce it.
 - `ui`: visual components and ephemeral workbench state.
 - `apps/web`: composition root for the shared React application.
 - `apps/desktop`: Electron security boundary and native implementations.

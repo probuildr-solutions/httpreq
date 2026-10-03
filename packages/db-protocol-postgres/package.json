@@ -1,0 +1,20 @@
+{
+    "name": "@httpreq/db-protocol-postgres",
+    "version": "0.5.1",
+    "author": {
+        "name": "Yamatri Reddy",
+        "email": "yamatrireddy94@gmail.com"
+    },
+    "license": "GPL-3.0-only",
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "dependencies": {
+        "@httpreq/db-core": "*",
+        "@httpreq/streaming-engine": "*"
+    },
+    "devDependencies": {
+        "@httpreq/test-servers": "*"
+    }
+}
