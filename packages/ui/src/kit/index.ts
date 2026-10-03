@@ -54,6 +54,8 @@ export { Notifications } from './Notifications';
 export { Menu, Modal, Popover, Tooltip, type ModalRootProps } from './overlays';
 export { StatusDot } from './StatusDot';
 export { Tabs } from './Tabs';
+export { TabBar, type TabBarProps } from './TabBar';
+export { filterTabItems, useTabOverflow, type TabListItem } from './tabBarUtils';
 export { notifications } from './notificationStore';
 export {
     initColorScheme,

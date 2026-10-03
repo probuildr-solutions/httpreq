@@ -41,13 +41,21 @@ import {
     isQueryTabId,
     newQueryTabId,
     patchQuery,
-    useHistory,
     useLive,
     useQueries,
+    useQuerySettings,
     type BottomTab,
     type QueryTab,
-    type StatementLog,
 } from './queryStore';
+import { applyExecutionEvent, changesShape } from './executionEvents';
+import {
+    afterClosing,
+    closeRunTargets,
+    isRunning,
+    type ResultCloseMode,
+    type ResultViewState,
+} from './resultSession';
+import { executeStatements } from './statementExecution';
 
 export type RunMode = 'current' | 'selection' | 'all';
 
@@ -89,12 +97,18 @@ export interface DbManagerApi {
     setConnection: (id: string, profileId: string | null) => void;
     run: (id: string, input: { text: string; mode: RunMode; offset?: number }) => Promise<void>;
     cancel: (id: string) => Promise<void>;
-    fetchAll: (id: string) => void;
-    demand: (id: string, rows: number) => void;
+    fetchAll: (id: string, run: number) => void;
+    /** Asks the host to read the shown result of a statement up to this many rows. */
+    demand: (id: string, run: number, rows: number) => void;
     explain: (id: string, text: string) => Promise<void>;
     transaction: (id: string, action: 'begin' | 'commit' | 'rollback') => Promise<void>;
     setBottom: (id: string, tab: BottomTab) => void;
-    setResult: (id: string, index: number) => void;
+    /** Shows another statement's result, or another result set of the shown statement. */
+    setResult: (id: string, run: number, resultIndex?: number) => void;
+    /** Closes result tabs (and releases their host queries); the others are untouched. */
+    closeResults: (id: string, mode: ResultCloseMode, run: number) => Promise<void>;
+    /** Remembers what a result's grid shows (scroll, selection) for when it is shown again. */
+    setResultView: (id: string, run: number, view: ResultViewState) => void;
     /** The api, for the result grid to fetch pages and cells. */
     readonly db: DbApi | null;
 }
@@ -129,6 +143,8 @@ const UNAVAILABLE: DbManagerApi = {
     transaction: async () => undefined,
     setBottom: () => undefined,
     setResult: () => undefined,
+    closeResults: async () => undefined,
+    setResultView: () => undefined,
     db: null,
 };
 
@@ -183,7 +199,6 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
     const [engines, setEngines] = useState<DbEngineInfo[]>([]);
     /** Resolves when a statement stops running (or pauses, waiting for the grid to scroll). */
     const settled = useRef(new Map<string, (snapshot: DbQuerySnapshot) => void>());
-    const startedAt = useRef(new Map<string, number>());
 
     const profileOf = (id: string | null) =>
         id ? useProfiles.getState().profiles.find((p) => p.id === id) : undefined;
@@ -204,18 +219,23 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                 }));
             } else if (event.topic === 'query.state') {
                 const { queryId, snapshot } = event.payload;
-                const tab = Object.values(useQueries.getState().tabs).find(
-                    (t) => t.runId === queryId,
+                const tab = Object.values(useQueries.getState().tabs).find((t) =>
+                    t.runs.some((run) => run.runId === queryId),
                 );
-                if (tab) {
-                    patchQuery(tab.id, (current) => ({
-                        snapshot,
-                        // A new result set appearing selects it only when the user has not chosen one.
-                        resultIndex: Math.min(
-                            current.resultIndex,
-                            Math.max(0, snapshot.results.length - 1),
-                        ),
-                    }));
+                const known = tab?.runs.find((run) => run.runId === queryId);
+                if (tab && known) {
+                    // A result that is new or has changed shape, or more rows of one already known.
+                    applyExecutionEvent(
+                        { tabId: tab.id, profileId: tab.profileId ?? '' },
+                        {
+                            type: changesShape(known.snapshot, snapshot)
+                                ? 'resultMetadataAvailable'
+                                : 'resultRowsAvailable',
+                            runId: queryId,
+                            snapshot,
+                        },
+                        () => useQueries.getState().tabs[tab.id],
+                    );
                 }
                 if (snapshot.state !== 'running' || snapshot.paused)
                     settled.current.get(queryId)?.(snapshot);
@@ -303,8 +323,8 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
             for (const tab of Object.values(useQueries.getState().tabs)) {
                 if (tab.profileId === profileId)
                     patchQuery(tab.id, {
-                        runId: null,
-                        snapshot: null,
+                        runs: [],
+                        activeRun: null,
                         running: false,
                         inTransaction: false,
                     });
@@ -536,10 +556,9 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                     // unsaved work: only what the user types counts.
                     savedText: text,
                     source: null,
-                    runId: null,
-                    snapshot: null,
+                    runs: [],
+                    activeRun: null,
                     log: [],
-                    resultIndex: 0,
                     bottom: 'results',
                     explain: null,
                     explainError: null,
@@ -554,11 +573,16 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
         return id;
     }, []);
 
-    const closeRun = useCallback(
-        async (runId: string | null) => {
-            if (!db || !runId) return;
-            settled.current.delete(runId);
-            await db.closeQuery(runId).catch(() => undefined);
+    /** Releases host queries: their cursors, spool files and read-ahead. */
+    const closeRuns = useCallback(
+        async (runIds: readonly string[]) => {
+            if (!db) return;
+            await Promise.all(
+                runIds.map((runId) => {
+                    settled.current.delete(runId);
+                    return db.closeQuery(runId).catch(() => undefined);
+                }),
+            );
         },
         [db],
     );
@@ -577,9 +601,14 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                 });
                 if (answer !== 'confirm') return;
             }
-            if (tab.running) await db?.cancelQuery(tab.runId ?? '').catch(() => undefined);
+            if (tab.running) {
+                const live = tab.runs.find(
+                    (run) => !run.snapshot || run.snapshot.state === 'running',
+                );
+                if (live) await db?.cancelQuery(live.runId).catch(() => undefined);
+            }
             if (tab.scriptId) await db?.closeScript(tab.scriptId).catch(() => undefined);
-            await closeRun(tab.runId);
+            await closeRuns(tab.runs.map((run) => run.runId));
             useQueries.setState((state) => {
                 const tabs = { ...state.tabs };
                 delete tabs[id];
@@ -587,7 +616,7 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
             });
             removeStudioTab(id);
         },
-        [db, closeRun],
+        [db, closeRuns],
     );
 
     const openTable = useCallback(
@@ -618,9 +647,43 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
         (id: string, bottom: BottomTab) => patchQuery(id, { bottom }),
         [],
     );
-    const setResult = useCallback(
-        (id: string, resultIndex: number) => patchQuery(id, { resultIndex }),
+    const setResult = useCallback((id: string, run: number, resultIndex?: number) => {
+        patchQuery(id, (tab) => ({
+            activeRun: run,
+            runs:
+                resultIndex === undefined
+                    ? tab.runs
+                    : tab.runs.map((item) =>
+                          item.index === run ? { ...item, resultIndex } : item,
+                      ),
+        }));
+    }, []);
+
+    const setResultView = useCallback(
+        (id: string, run: number, view: ResultViewState) =>
+            patchQuery(id, (tab) => ({
+                runs: tab.runs.map((item) => (item.index === run ? { ...item, view } : item)),
+            })),
         [],
+    );
+
+    const closeResults = useCallback(
+        async (id: string, mode: ResultCloseMode, run: number) => {
+            const tab = useQueries.getState().tabs[id];
+            if (!tab) return;
+            const targets = closeRunTargets(tab.runs, run, mode);
+            if (targets.length === 0) return;
+            const closing = tab.runs.filter((item) => targets.includes(item.index));
+            // A statement still running is stopped, not left reading into a result nobody can see.
+            for (const item of closing)
+                if (isRunning(item)) await db?.cancelQuery(item.runId).catch(() => undefined);
+            await closeRuns(closing.map((item) => item.runId));
+            patchQuery(id, (current) => {
+                const left = afterClosing(current.runs, current.activeRun, targets);
+                return { runs: left.runs, activeRun: left.active };
+            });
+        },
+        [db, closeRuns],
     );
 
     const run = useCallback(
@@ -662,7 +725,8 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                 return;
             }
 
-            await closeRun(tab.runId);
+            // The last execution's results are released before a new one starts.
+            await closeRuns(tab.runs.map((item) => item.runId));
             // The tab's database and schema are set on the shared connection before its statements,
             // so a tab behaves the same whichever tab ran last.
             const engine = profile.settings.engine;
@@ -675,10 +739,9 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                 .filter(Boolean);
             patchQuery(id, {
                 running: true,
-                runId: null,
-                snapshot: null,
+                runs: [],
+                activeRun: null,
                 log: [],
-                resultIndex: 0,
                 bottom: 'results',
                 explain: null,
                 explainError: null,
@@ -702,86 +765,28 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                     return;
                 }
             }
-            const log: StatementLog[] = [];
-            const pushLog = (entry: StatementLog) => {
-                log[entry.index] = entry;
-                patchQuery(id, { log: [...log] });
-            };
-
-            let previous: string | null = null;
-            for (let index = 0; index < statements.length; index++) {
-                const sql = statements[index]!.sql;
-                const preview = sql.replace(/\s+/g, ' ').slice(0, 120);
-                const queryId = hex16();
-                startedAt.current.set(queryId, Date.now());
-                pushLog({ index, sql: preview, state: 'running' });
-                if (previous) await closeRun(previous);
-                previous = queryId;
-                patchQuery(id, { runId: queryId, snapshot: null, resultIndex: 0 });
-                let snapshot: DbQuerySnapshot;
-                try {
-                    const waiting = new Promise<DbQuerySnapshot>((resolve) =>
-                        settled.current.set(queryId, resolve),
-                    );
-                    await db.startQuery(profile.id, queryId, sql, profile.settings.queryTimeoutMs);
-                    snapshot = await waiting;
-                } catch (error) {
-                    const text = message(error);
-                    pushLog({ index, sql: preview, state: 'failed', message: text });
-                    useHistory.getState().add({
-                        profileId: profile.id,
-                        sql,
-                        at: Date.now(),
-                        elapsedMs: 0,
-                        state: 'failed',
-                        error: text,
-                    });
-                    patchQuery(id, { bottom: 'messages' });
-                    break;
-                } finally {
-                    settled.current.delete(queryId);
-                }
-
-                const first = snapshot.results[0];
-                const last = snapshot.results.at(-1);
-                const state = snapshot.state === 'running' ? 'done' : snapshot.state;
-                pushLog({
-                    index,
-                    sql: preview,
-                    state,
-                    elapsedMs: snapshot.elapsedMs,
-                    ...(first
-                        ? { rows: snapshot.results.reduce((sum, r) => sum + r.rowCount, 0) }
-                        : {}),
-                    ...(last?.affectedRows !== undefined
-                        ? { affectedRows: last.affectedRows }
-                        : {}),
-                    ...(snapshot.error ? { message: snapshot.error.message } : {}),
-                });
-                useHistory.getState().add({
-                    profileId: profile.id,
-                    sql,
-                    at: Date.now(),
-                    elapsedMs: snapshot.elapsedMs,
-                    state,
-                    ...(first ? { rows: first.rowCount } : {}),
-                    ...(last?.affectedRows !== undefined
-                        ? { affectedRows: last.affectedRows }
-                        : {}),
-                    ...(snapshot.error ? { error: snapshot.error.message } : {}),
-                });
-                if (snapshot.state === 'failed') {
-                    patchQuery(id, { bottom: 'messages' });
-                    break;
-                }
-                if (snapshot.state === 'cancelled') break;
-                // A statement that changes data shows its message; one that returns rows shows the grid.
-                if (index === statements.length - 1 && !first?.columns.length)
-                    patchQuery(id, { bottom: 'messages' });
+            // The script is run by `executeStatements`, which reports what happens as events; the
+            // tab's state is only ever changed by applying them.
+            const context = { tabId: id, profileId: profile.id };
+            try {
+                await executeStatements(
+                    {
+                        db,
+                        settled: settled.current,
+                        connectionId: profile.id,
+                        timeoutMs: profile.settings.queryTimeoutMs,
+                        rowLimit: useQuerySettings.getState().runAllRowLimit,
+                        newId: hex16,
+                    },
+                    statements,
+                    (event) =>
+                        applyExecutionEvent(context, event, () => useQueries.getState().tabs[id]),
+                );
+            } finally {
+                patchQuery(id, { running: false });
             }
-            patchQuery(id, { running: false });
         },
-        [db, connect, closeRun, ops],
+        [db, connect, closeRuns, ops],
     );
 
     const cancel = useCallback(
@@ -790,25 +795,29 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
             if (!db || !tab) return;
             if (tab.scriptId && tab.script?.state === 'running')
                 await db.cancelScript(tab.scriptId).catch(() => undefined);
-            if (tab.runId) await db.cancelQuery(tab.runId).catch(() => undefined);
+            // Stop is for the statement that is running; finished results stay as they are.
+            const live = tab.runs.filter(isRunning).pop();
+            if (live) await db.cancelQuery(live.runId).catch(() => undefined);
         },
         [db],
     );
 
     const demand = useCallback(
-        (id: string, rows: number) => {
-            const tab = useQueries.getState().tabs[id];
-            if (db && tab?.runId)
-                void db.demand(tab.runId, tab.resultIndex, rows).catch(() => undefined);
+        (id: string, runIndex: number, rows: number) => {
+            const run = useQueries
+                .getState()
+                .tabs[id]?.runs.find((item) => item.index === runIndex);
+            if (db && run) void db.demand(run.runId, run.resultIndex, rows).catch(() => undefined);
         },
         [db],
     );
 
     const fetchAll = useCallback(
-        (id: string) => {
-            const tab = useQueries.getState().tabs[id];
-            if (db && tab?.runId)
-                void db.fetchAll(tab.runId, tab.resultIndex).catch(() => undefined);
+        (id: string, runIndex: number) => {
+            const run = useQueries
+                .getState()
+                .tabs[id]?.runs.find((item) => item.index === runIndex);
+            if (db && run) void db.fetchAll(run.runId, run.resultIndex).catch(() => undefined);
         },
         [db],
     );
@@ -889,6 +898,8 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                       transaction,
                       setBottom,
                       setResult,
+                      closeResults,
+                      setResultView,
                       db,
                   }
                 : UNAVAILABLE,
@@ -920,6 +931,8 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
             transaction,
             setBottom,
             setResult,
+            closeResults,
+            setResultView,
         ],
     );
 }

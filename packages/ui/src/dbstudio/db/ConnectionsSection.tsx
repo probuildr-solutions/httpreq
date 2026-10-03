@@ -6,12 +6,12 @@
 import {
     IconChevronDown,
     IconChevronRight,
-    IconDots,
     IconPlus,
     IconSearch,
     IconX,
 } from '@tabler/icons-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { TREE_ROW_HEIGHT, TreeRowActions, TreeRowMenuButton } from '../TreeRowActions';
 import { ActionIcon, Menu, StatusDot, Text, Tooltip, UnstyledButton, cx } from '../../kit';
 import { confirmAction } from '../../confirm';
 import { notifications } from '../../kit';
@@ -260,7 +260,7 @@ function TreeRow({
                 role="treeitem"
                 aria-level={row.depth + 1}
                 aria-expanded={row.expandable ? row.expanded : undefined}
-                className="group flex items-center rounded-sm hover:bg-hover"
+                className={cx('group flex items-center rounded-sm hover:bg-hover', TREE_ROW_HEIGHT)}
                 style={{ paddingLeft: row.depth * 12 }}
             >
                 <UnstyledButton
@@ -279,7 +279,7 @@ function TreeRow({
                 </UnstyledButton>
                 <UnstyledButton
                     className={cx(
-                        'flex min-w-0 flex-1 items-center gap-1.5 py-1 text-left text-sm',
+                        'flex h-full min-w-0 flex-1 items-center gap-1.5 text-left text-sm',
                         row.kind === 'message' && 'cursor-default',
                         row.problem && 'text-red-500',
                         row.loading && 'text-dimmed',
@@ -308,9 +308,7 @@ function TreeRow({
                     )}
                 </UnstyledButton>
                 {row.kind !== 'message' && row.kind !== 'column' && row.kind !== 'index' && (
-                    <span className="flex-none opacity-0 focus-within:opacity-100 group-hover:opacity-100">
-                        {menu}
-                    </span>
+                    <TreeRowActions>{menu}</TreeRowActions>
                 )}
             </div>
         </li>
@@ -342,14 +340,7 @@ function RowMenu({
     return (
         <Menu position="bottom-end" width={230}>
             <Menu.Target>
-                <ActionIcon
-                    size="xs"
-                    variant="subtle"
-                    color="gray"
-                    aria-label={`Actions for ${row.label}`}
-                >
-                    <IconDots size={13} />
-                </ActionIcon>
+                <TreeRowMenuButton aria-label={`Actions for ${row.label}`} />
             </Menu.Target>
             <Menu.Dropdown>
                 {row.kind === 'connection' && (
@@ -429,6 +420,16 @@ function RowMenu({
                                 New stored procedure…
                             </Menu.Item>
                         )}
+                        {can.supportsTriggers && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'trigger')}>
+                                New trigger…
+                            </Menu.Item>
+                        )}
+                        {can.supportsEvents && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'event')}>
+                                New event…
+                            </Menu.Item>
+                        )}
                     </>
                 )}
                 {row.kind === 'group' && (
@@ -460,6 +461,16 @@ function RowMenu({
                                 New stored procedure…
                             </Menu.Item>
                         )}
+                        {row.object === 'triggers' && can.supportsTriggers && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'trigger')}>
+                                New trigger…
+                            </Menu.Item>
+                        )}
+                        {row.object === 'events' && can.supportsEvents && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'event')}>
+                                New event…
+                            </Menu.Item>
+                        )}
                     </>
                 )}
                 {(isTable || isView) && (
@@ -482,6 +493,11 @@ function RowMenu({
                         )}
                         {isTable && can.supportsTriggers && (
                             <Menu.Item onClick={() => actions.triggers(row)}>Triggers…</Menu.Item>
+                        )}
+                        {isTable && can.supportsTriggers && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'trigger')}>
+                                New trigger…
+                            </Menu.Item>
                         )}
                         {isTable && can.supportsERDiagram && (
                             <Menu.Item onClick={() => actions.relationships(row)}>
@@ -569,7 +585,12 @@ function RowMenu({
                     </>
                 )}
                 {row.kind === 'event' && (
-                    <Menu.Item onClick={onDefinition}>Show definition</Menu.Item>
+                    <>
+                        <Menu.Item onClick={onDefinition}>Show definition</Menu.Item>
+                        <Menu.Item onClick={() => void actions.editDefinition(row)}>
+                            Edit…
+                        </Menu.Item>
+                    </>
                 )}
             </Menu.Dropdown>
         </Menu>

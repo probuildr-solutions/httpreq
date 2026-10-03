@@ -3,30 +3,22 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import {
-    IconArrowBackUp,
-    IconCheck,
-    IconDeviceFloppy,
-    IconDownload,
-    IconPlayerPlay,
-    IconPlayerStop,
-    IconPlayerTrackNext,
-    IconRoute,
-    IconTransactionBitcoin,
-} from '@tabler/icons-react';
 import type { editor } from 'monaco-editor';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CodeEditor } from '../../editor/CodeEditor';
-import { Button, Select, Text, Tooltip, UnstyledButton, cx } from '../../kit';
+import { Text, UnstyledButton, cx } from '../../kit';
 import { formatDuration } from '../../format';
-import { ResultGrid } from './ResultGrid';
+import { QueryToolbar } from './QueryToolbar';
+import { ResultsPanel } from './ResultsPanel';
+import { type ToolbarActionId } from './toolbarActions';
 import {
-    currentResult,
+    currentRun,
     useHistory,
     useQueries,
     type BottomTab,
     type QueryTab as Tab,
 } from './queryStore';
+import { runSummary } from './resultSession';
 import { useProfiles } from './profiles';
 import { useLive } from './queryStore';
 import { layoutOf } from './engines';
@@ -145,8 +137,43 @@ export function QueryTab({ id }: { id: string }) {
     if (!tab) return null;
 
     const connected = tab.profileId ? status[tab.profileId]?.state === 'connected' : false;
-    const result = currentResult(tab);
-    const snapshot = tab.snapshot;
+    const shown = currentRun(tab);
+
+    /** The text a statement-level action works on: the selection, or the whole editor. */
+    const selectedOrAll = (): string => {
+        const model = instance.current?.getModel();
+        const selection = instance.current?.getSelection();
+        return model && selection && !selection.isEmpty()
+            ? model.getValueInRange(selection)
+            : tab.text;
+    };
+
+    const onAction = (action: ToolbarActionId) => {
+        switch (action) {
+            case 'run':
+                return run('current');
+            case 'runAll':
+                return run('all');
+            case 'stop':
+                return void manager.cancel(id);
+            case 'explain':
+                return void manager.explain(id, selectedOrAll());
+            case 'save':
+                return void actions.saveTab(id);
+            case 'export':
+                if (profile)
+                    openAdminDialog({
+                        kind: 'export',
+                        profileId: profile.id,
+                        source: { kind: 'query', text: selectedOrAll(), label: tab.title },
+                    });
+                return;
+            case 'begin':
+            case 'commit':
+            case 'rollback':
+                return void manager.transaction(id, action);
+        }
+    };
 
     const onKeyDown = (event: React.KeyboardEvent) => {
         if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
@@ -169,193 +196,30 @@ export function QueryTab({ id }: { id: string }) {
             onKeyDownCapture={onKeyDown}
             data-testid="query-tab"
         >
-            <div className="box-border flex h-9 flex-none items-center gap-1.5 overflow-x-auto overflow-y-hidden border-b border-line bg-chrome px-2 whitespace-nowrap">
-                <Select
-                    size="xs"
-                    aria-label="Connection"
-                    placeholder="Choose a connection"
-                    value={tab.profileId}
-                    data={profiles.map((p) => ({ value: p.id, label: p.name }))}
-                    onChange={(value) => manager.setConnection(id, value)}
-                    className="w-44 flex-none"
-                />
-                {databases.length > 0 && (
-                    <Select
-                        size="xs"
-                        aria-label="Database"
-                        placeholder="Database"
-                        clearable
-                        value={tab.database}
-                        data={databases.map((name) => ({ value: name, label: name }))}
-                        onChange={(value) => manager.setContext(id, { database: value })}
-                        className="w-36 flex-none"
-                    />
-                )}
-                {layout.schemas && schemas.length > 0 && (
-                    <Select
-                        size="xs"
-                        aria-label="Schema"
-                        placeholder="Schema"
-                        clearable
-                        value={tab.schema}
-                        data={schemas.map((name) => ({ value: name, label: name }))}
-                        onChange={(value) => manager.setContext(id, { schema: value })}
-                        className="w-32 flex-none"
-                    />
-                )}
-                {/* Run, Run all and Stop are always mounted, in fixed places: starting a query only
-                    toggles which of them is enabled, so the toolbar never changes width or wraps,
-                    and nothing beside or below it moves. */}
-                <Tooltip
-                    label={`Run the ${layout.statementNoun} at the cursor, or the selection (Ctrl+Enter)`}
-                >
-                    <Button
-                        size="xs"
-                        leftSection={<IconPlayerPlay size={14} />}
-                        disabled={!profile || tab.running}
-                        onClick={() => run('current')}
-                    >
-                        Run
-                    </Button>
-                </Tooltip>
-                <Tooltip label={`Run every ${layout.statementNoun} (Ctrl+Shift+Enter)`}>
-                    <Button
-                        size="xs"
-                        variant="light"
-                        leftSection={<IconPlayerTrackNext size={14} />}
-                        disabled={!profile || tab.running}
-                        onClick={() => run('all')}
-                    >
-                        Run all
-                    </Button>
-                </Tooltip>
-                <Button
-                    size="xs"
-                    color="red"
-                    variant="light"
-                    leftSection={<IconPlayerStop size={14} />}
-                    disabled={!tab.running}
-                    onClick={() => void manager.cancel(id)}
-                >
-                    Stop
-                </Button>
-                {canExplain && (
-                    <Button
-                        size="xs"
-                        variant="subtle"
-                        leftSection={<IconRoute size={14} />}
-                        disabled={!profile || tab.running}
-                        onClick={() => {
-                            const model = instance.current?.getModel();
-                            const selection = instance.current?.getSelection();
-                            const text =
-                                model && selection && !selection.isEmpty()
-                                    ? model.getValueInRange(selection)
-                                    : tab.text;
-                            void manager.explain(id, text);
-                        }}
-                    >
-                        Explain
-                    </Button>
-                )}
-                <Tooltip label="Save to a file (Ctrl+S)">
-                    <Button
-                        size="xs"
-                        variant="subtle"
-                        leftSection={<IconDeviceFloppy size={14} />}
-                        disabled={!isQueryDirty(tab) && !!tab.source}
-                        onClick={() => void actions.saveTab(id)}
-                    >
-                        Save
-                    </Button>
-                </Tooltip>
-                <Tooltip label="Export the result of this statement to a file">
-                    <Button
-                        size="xs"
-                        variant="subtle"
-                        leftSection={<IconDownload size={14} />}
-                        disabled={!profile || tab.running || !capabilities.length}
-                        onClick={() => {
-                            const model = instance.current?.getModel();
-                            const selection = instance.current?.getSelection();
-                            const text =
-                                model && selection && !selection.isEmpty()
-                                    ? model.getValueInRange(selection)
-                                    : tab.text;
-                            if (profile)
-                                openAdminDialog({
-                                    kind: 'export',
-                                    profileId: profile.id,
-                                    source: { kind: 'query', text, label: tab.title },
-                                });
-                        }}
-                    >
-                        Export
-                    </Button>
-                </Tooltip>
-                <Tooltip label="Export the result of this statement to a file">
-                    <Button
-                        size="xs"
-                        variant="subtle"
-                        leftSection={<IconDownload size={14} />}
-                        disabled={!profile || tab.running}
-                        onClick={() => {
-                            const model = instance.current?.getModel();
-                            const selection = instance.current?.getSelection();
-                            const text =
-                                model && selection && !selection.isEmpty()
-                                    ? model.getValueInRange(selection)
-                                    : tab.text;
-                            if (profile)
-                                openAdminDialog({
-                                    kind: 'export',
-                                    profileId: profile.id,
-                                    source: { kind: 'query', text, label: tab.title },
-                                });
-                        }}
-                    >
-                        Export
-                    </Button>
-                </Tooltip>
-                <span className="mx-1 h-4 w-px bg-line" />
-                {canTransact && tab.inTransaction ? (
-                    <>
-                        <Button
-                            size="xs"
-                            variant="light"
-                            color="teal"
-                            leftSection={<IconCheck size={14} />}
-                            onClick={() => void manager.transaction(id, 'commit')}
-                        >
-                            Commit
-                        </Button>
-                        <Button
-                            size="xs"
-                            variant="light"
-                            color="yellow"
-                            leftSection={<IconArrowBackUp size={14} />}
-                            onClick={() => void manager.transaction(id, 'rollback')}
-                        >
-                            Roll back
-                        </Button>
-                    </>
-                ) : canTransact ? (
-                    <Tooltip label="Statements run in a transaction until you commit or roll back">
-                        <Button
-                            size="xs"
-                            variant="subtle"
-                            leftSection={<IconTransactionBitcoin size={14} />}
-                            disabled={!profile || tab.running}
-                            onClick={() => void manager.transaction(id, 'begin')}
-                        >
-                            Begin
-                        </Button>
-                    </Tooltip>
-                ) : null}
-                <span className="ml-auto flex-none text-xs text-dimmed">
-                    {profile && !connected ? 'Not connected · connects when you run' : ''}
-                </span>
-            </div>
+            <QueryToolbar
+                state={{
+                    hasConnection: !!profile,
+                    running: tab.running,
+                    canExplain,
+                    canTransact,
+                    inTransaction: tab.inTransaction,
+                    saved: !isQueryDirty(tab) && !!tab.source,
+                    canExport: capabilities.length > 0,
+                    statementNoun: layout.statementNoun,
+                }}
+                profiles={profiles}
+                connectionId={tab.profileId}
+                database={tab.database}
+                schema={tab.schema}
+                databases={databases}
+                schemas={schemas}
+                withSchemas={!!layout.schemas}
+                note={profile && !connected ? 'Not connected · connects when you run' : ''}
+                onConnection={(value) => manager.setConnection(id, value)}
+                onDatabase={(value) => manager.setContext(id, { database: value })}
+                onSchema={(value) => manager.setContext(id, { schema: value })}
+                onAction={onAction}
+            />
 
             <div className="min-h-24 min-w-0 flex-[2] overflow-hidden border-b border-line">
                 <CodeEditor
@@ -395,15 +259,11 @@ export function QueryTab({ id }: { id: string }) {
                             {item.label}
                         </UnstyledButton>
                     ))}
-                    {snapshot && result && (
+                    {tab.bottom === 'results' && shown && (
                         <span className="ml-auto pr-3 text-xs text-dimmed">
-                            {COUNT.format(result.rowCount)} row{result.rowCount === 1 ? '' : 's'}
-                            {!result.complete && snapshot.state === 'running' && !snapshot.paused
-                                ? ' so far'
-                                : ''}
-                            {!result.complete && snapshot.paused ? ' loaded' : ''}
-                            {' · '}
-                            {formatDuration(snapshot.elapsedMs)}
+                            {tab.runs.length > 1
+                                ? `${tab.runs.length} statements`
+                                : runSummary(shown)}
                         </span>
                     )}
                 </div>
@@ -428,56 +288,8 @@ function BottomPanel({ tab }: { tab: Tab }) {
     const manager = useDbManager();
     const history = useHistory((state) => state.entries);
     const enabled = useHistory((state) => state.enabled);
-    const snapshot = tab.snapshot;
-    const result = currentResult(tab);
 
-    if (tab.bottom === 'results') {
-        if (!snapshot || !result || !manager.db || !tab.runId) {
-            return (
-                <Text size="sm" className="p-3 text-dimmed">
-                    {tab.running ? 'Running…' : 'Run a statement to see its result here.'}
-                </Text>
-            );
-        }
-        return (
-            <div className="flex h-full flex-col">
-                {snapshot.results.length > 1 && (
-                    <div className="flex flex-none gap-1 border-b border-line px-2 py-1">
-                        {snapshot.results.map((item, index) => (
-                            <UnstyledButton
-                                key={item.index}
-                                className={cx(
-                                    'rounded-sm px-2 py-0.5 text-xs',
-                                    index === tab.resultIndex
-                                        ? 'bg-primary-soft'
-                                        : 'hover:bg-hover',
-                                )}
-                                onClick={() => manager.setResult(tab.id, index)}
-                            >
-                                Result {index + 1}
-                            </UnstyledButton>
-                        ))}
-                    </div>
-                )}
-                <div className="min-h-0 flex-1">
-                    <ResultGrid
-                        api={manager.db}
-                        runId={tab.runId}
-                        result={result}
-                        onDemand={(rows) => manager.demand(tab.id, rows)}
-                    />
-                </div>
-                {snapshot.paused && !result.complete && (
-                    <div className="flex flex-none items-center gap-2 border-t border-line px-3 py-1 text-xs text-dimmed">
-                        The server has more rows; they are read as you scroll.
-                        <Button size="xs" variant="subtle" onClick={() => manager.fetchAll(tab.id)}>
-                            Load all
-                        </Button>
-                    </div>
-                )}
-            </div>
-        );
-    }
+    if (tab.bottom === 'results') return <ResultsPanel tab={tab} />;
 
     if (tab.bottom === 'messages') {
         if (tab.log.length === 0) {

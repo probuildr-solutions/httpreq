@@ -5,7 +5,7 @@
 
 import { IconHistory, IconPin, IconPlus, IconTerminal2, IconX } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
-import { Menu, Tooltip, UnstyledButton, cx } from '../../kit';
+import { Menu, TabBar, Tooltip, UnstyledButton, cx, type TabListItem } from '../../kit';
 import { formatSize } from '../../format';
 import { ObjectIcon, type ObjectKind } from '../icons';
 import { useDbManager } from '../db/useDbManager';
@@ -26,6 +26,11 @@ const ICON_OF: Record<TabKind, ObjectKind> = {
     documents: 'collection',
     indexes: 'index',
     triggers: 'trigger',
+    'trigger-editor': 'trigger',
+    'procedure-editor': 'procedure',
+    'function-editor': 'function',
+    'event-editor': 'event',
+    'collection-designer': 'collection',
 };
 
 /**
@@ -58,84 +63,99 @@ export function TabStrip() {
     const allWithPinned = menu ? closeTargets(strip, menu.id, 'all', true) : [];
     const all = menu ? closeTargets(strip, menu.id, 'all') : [];
 
+    const listed: TabListItem[] = infos.map((info) => ({
+        id: info.id,
+        title: info.title,
+        subtitle: info.subtitle,
+        dirty: info.dirty,
+        icon: <ObjectIcon kind={ICON_OF[info.kind]} />,
+    }));
+
     return (
-        <div
-            role="tablist"
-            aria-label="Open tabs"
-            className="flex h-[var(--hr-strip-height)] flex-none items-stretch overflow-x-auto border-b border-line bg-chrome"
-        >
-            {infos.map((info) => (
-                <TabItem
-                    key={info.id}
-                    info={info}
-                    selected={info.id === activeId}
-                    renaming={renaming === info.id}
-                    dragging={dragging === info.id}
-                    tooltip={
-                        info.kind === 'file' && files[info.id]
-                            ? `${info.title} · ${formatSize(files[info.id]!.file.size)}`
-                            : [
-                                  info.title,
-                                  info.subtitle,
-                                  info.fileName && info.fileName !== info.title
-                                      ? info.fileName
-                                      : '',
-                              ]
-                                  .filter(Boolean)
-                                  .join(' · ')
-                    }
-                    onSelect={() => activate(info.id)}
-                    onClose={() => void actions.closeTabs([info.id])}
-                    onContextMenu={(x, y) => {
-                        setMenu({ id: info.id, x, y });
-                    }}
-                    onStartRename={() => setRenaming(info.id)}
-                    onRename={(title) => {
-                        if (title !== null) actions.rename(info.id, title);
-                        setRenaming(null);
-                    }}
-                    onDragStart={() => setDragging(info.id)}
-                    onDragEnd={() => setDragging(null)}
-                    onDropOn={() => {
-                        if (dragging) actions.move(dragging, info.id);
-                        setDragging(null);
-                    }}
-                />
-            ))}
-            {manager.available && (
-                <Tooltip label="New query">
-                    <UnstyledButton
-                        aria-label="New query"
-                        className="grid w-8 flex-none place-items-center text-dimmed hover:bg-chrome-hover hover:text-fg"
-                        onClick={() => manager.newQuery(null)}
-                    >
-                        <IconTerminal2 size={15} />
-                    </UnstyledButton>
-                </Tooltip>
-            )}
-            <Tooltip label="Open a file">
-                <UnstyledButton
-                    aria-label="Open a file"
-                    className="grid w-8 flex-none place-items-center text-dimmed hover:bg-chrome-hover hover:text-fg"
-                    onClick={() => void api.openFile()}
-                    disabled={opening}
-                >
-                    <IconPlus size={15} />
-                </UnstyledButton>
-            </Tooltip>
-            {closedCount > 0 && (
-                <Tooltip label="Reopen the last closed tab">
-                    <UnstyledButton
-                        aria-label="Reopen closed tab"
-                        className="grid w-8 flex-none place-items-center text-dimmed hover:bg-chrome-hover hover:text-fg"
-                        onClick={() => actions.reopenClosed()}
-                    >
-                        <IconHistory size={15} />
-                    </UnstyledButton>
-                </Tooltip>
-            )}
-            <span className="flex-1" />
-            <TaskCenter />
+        <>
+            <TabBar
+                label="Open tabs"
+                items={listed}
+                activeId={activeId}
+                onSelect={activate}
+                noun="tabs"
+                trailing={
+                    <>
+                        {manager.available && (
+                            <Tooltip label="New query">
+                                <UnstyledButton
+                                    aria-label="New query"
+                                    className="grid w-8 flex-none place-items-center text-dimmed hover:bg-chrome-hover hover:text-fg"
+                                    onClick={() => manager.newQuery(null)}
+                                >
+                                    <IconTerminal2 size={15} />
+                                </UnstyledButton>
+                            </Tooltip>
+                        )}
+                        <Tooltip label="Open a file">
+                            <UnstyledButton
+                                aria-label="Open a file"
+                                className="grid w-8 flex-none place-items-center text-dimmed hover:bg-chrome-hover hover:text-fg"
+                                onClick={() => void api.openFile()}
+                                disabled={opening}
+                            >
+                                <IconPlus size={15} />
+                            </UnstyledButton>
+                        </Tooltip>
+                        {closedCount > 0 && (
+                            <Tooltip label="Reopen the last closed tab">
+                                <UnstyledButton
+                                    aria-label="Reopen closed tab"
+                                    className="grid w-8 flex-none place-items-center text-dimmed hover:bg-chrome-hover hover:text-fg"
+                                    onClick={() => actions.reopenClosed()}
+                                >
+                                    <IconHistory size={15} />
+                                </UnstyledButton>
+                            </Tooltip>
+                        )}
+                        <TaskCenter />
+                    </>
+                }
+            >
+                {infos.map((info) => (
+                    <TabItem
+                        key={info.id}
+                        info={info}
+                        selected={info.id === activeId}
+                        renaming={renaming === info.id}
+                        dragging={dragging === info.id}
+                        tooltip={
+                            info.kind === 'file' && files[info.id]
+                                ? `${info.title} · ${formatSize(files[info.id]!.file.size)}`
+                                : [
+                                      info.title,
+                                      info.subtitle,
+                                      info.fileName && info.fileName !== info.title
+                                          ? info.fileName
+                                          : '',
+                                  ]
+                                      .filter(Boolean)
+                                      .join(' · ')
+                        }
+                        onSelect={() => activate(info.id)}
+                        onClose={() => void actions.closeTabs([info.id])}
+                        onContextMenu={(x, y) => {
+                            setMenu({ id: info.id, x, y });
+                        }}
+                        onStartRename={() => setRenaming(info.id)}
+                        onRename={(title) => {
+                            if (title !== null) actions.rename(info.id, title);
+                            setRenaming(null);
+                        }}
+                        onDragStart={() => setDragging(info.id)}
+                        onDragEnd={() => setDragging(null)}
+                        onDropOn={() => {
+                            if (dragging) actions.move(dragging, info.id);
+                            setDragging(null);
+                        }}
+                    />
+                ))}
+            </TabBar>
 
             <Menu
                 opened={!!menuInfo}
@@ -240,7 +260,7 @@ export function TabStrip() {
                     )}
                 </Menu.Dropdown>
             </Menu>
-        </div>
+        </>
     );
 }
 

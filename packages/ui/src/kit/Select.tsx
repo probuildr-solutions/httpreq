@@ -249,7 +249,7 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
                     className={cx(
                         'flex w-full items-center gap-1.5 text-left outline-none',
                         controlSize(size, variant),
-                        inputFrame(variant, !!error),
+                        inputFrame(variant, !!error, size),
                         'focus-visible:border-primary',
                         disabled && 'opacity-60',
                         inputClassName,
@@ -274,7 +274,11 @@ export const Select = forwardRef<HTMLButtonElement, SelectProps>(function Select
                             <IconX size={13} aria-hidden />
                         </span>
                     ) : (
-                        <IconChevronDown size={14} aria-hidden className="shrink-0 text-dimmed" />
+                        <IconChevronDown
+                            size={size === 'toolbar' ? 13 : 14}
+                            aria-hidden
+                            className="shrink-0 text-dimmed"
+                        />
                     )}
                 </button>
             </div>

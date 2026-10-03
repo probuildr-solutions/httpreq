@@ -30,10 +30,9 @@ const tab = (): Tab => ({
     text: 'select 1',
     savedText: 'select 1',
     source: null,
-    runId: null,
-    snapshot: null,
+    runs: [],
+    activeRun: null,
     log: [],
-    resultIndex: 0,
     bottom: 'results',
     explain: null,
     explainError: null,
@@ -113,7 +112,7 @@ describe('the query toolbar while a statement runs', () => {
             </DbManagerContext.Provider>,
         );
         const editor = screen.getByTestId('editor');
-        act(() => patchQuery(id, { running: true, runId: 'r'.padEnd(16, '0') }));
+        act(() => patchQuery(id, { running: true }));
         act(() =>
             patchQuery(id, { running: false, log: [{ index: 0, sql: 'select 1', state: 'done' }] }),
         );

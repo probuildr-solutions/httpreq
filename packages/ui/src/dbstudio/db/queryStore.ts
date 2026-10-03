@@ -4,13 +4,9 @@
  */
 
 import { create } from 'zustand';
-import type {
-    DbConnectionStatus,
-    DbExplainPlan,
-    DbQuerySnapshot,
-    DbScriptProgress,
-} from '@httpreq/shared';
+import type { DbConnectionStatus, DbExplainPlan, DbScriptProgress } from '@httpreq/shared';
 import type { MetaEntry } from './explorerRows';
+import { activeRunOf, resultOfRun, type StatementRun } from './resultSession';
 
 /** Live state of the connections: what the host reports, and the schema objects loaded so far. */
 interface LiveState {
@@ -58,12 +54,14 @@ export interface QueryTab {
     savedText: string;
     /** The file this tab was opened from or saved to: an opaque token and its name, never a path. */
     source: { token: string; name: string } | null;
-    /** The host's id for the statement whose result is shown. */
-    runId: string | null;
-    snapshot: DbQuerySnapshot | null;
+    /**
+     * Every statement of the last execution, in order, each with its own host query, metadata and
+     * view state. "Run all" appends one per statement; none replaces another.
+     */
+    runs: StatementRun[];
+    /** The statement number (`StatementRun.index`) whose result is shown. */
+    activeRun: number | null;
     log: StatementLog[];
-    /** Which result set of the statement is shown. */
-    resultIndex: number;
     bottom: BottomTab;
     explain: DbExplainPlan | null;
     explainError: string | null;
@@ -103,8 +101,42 @@ export const patchQuery = (
         return { tabs: { ...state.tabs, [id]: { ...tab, ...changes } } };
     });
 
-/** The result set of a tab's last statement that is shown. */
-export const currentResult = (tab: QueryTab) => tab.snapshot?.results[tab.resultIndex] ?? null;
+/** The statement whose result is shown. */
+export const currentRun = (tab: QueryTab): StatementRun | null =>
+    activeRunOf(tab.runs, tab.activeRun);
+
+/** The result set of the shown statement that its grid shows. */
+export const currentResult = (tab: QueryTab) => resultOfRun(currentRun(tab));
+
+/** Changes one statement run of a tab, found by its host query id. */
+export const patchRun = (
+    tabId: string,
+    runId: string,
+    patch: Partial<StatementRun> | ((run: StatementRun) => Partial<StatementRun>),
+) =>
+    patchQuery(tabId, (tab) => ({
+        runs: tab.runs.map((run) =>
+            run.runId === runId
+                ? { ...run, ...(typeof patch === 'function' ? patch(run) : patch) }
+                : run,
+        ),
+    }));
+
+/* ---------- Result limits ---------- */
+
+interface QuerySettings {
+    /**
+     * When a script has more statements after one that returns rows, that result is read on to this
+     * many rows before the next statement starts (the host holds them on disk, not in the window).
+     */
+    runAllRowLimit: number;
+}
+
+export const DEFAULT_RUN_ALL_ROW_LIMIT = 50_000;
+
+export const useQuerySettings = create<QuerySettings>(() => ({
+    runAllRowLimit: DEFAULT_RUN_ALL_ROW_LIMIT,
+}));
 
 /* ---------- History ---------- */
 
