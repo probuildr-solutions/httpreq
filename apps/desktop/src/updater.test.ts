@@ -7,7 +7,12 @@
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopUpdateState } from '@httpreq/shared';
-import { createUpdateController, supportsSelfUpdate, type UpdaterLike } from './updater';
+import {
+    createUpdateController,
+    describeUpdateError,
+    supportsSelfUpdate,
+    type UpdaterLike,
+} from './updater';
 
 class FakeUpdater extends EventEmitter {
     autoDownload = false;
@@ -64,13 +69,18 @@ describe('update controller', () => {
     it('turns every failure into an error state and recovers on the next check', async () => {
         const { updater, controller } = setup();
         updater.checkForUpdates.mockRejectedValueOnce(new Error('offline\nstack'));
-        expect(await controller.check()).toEqual({ status: 'error', error: 'offline' });
+        expect(await controller.check()).toMatchObject({
+            status: 'error',
+            errorKind: 'unknown',
+            diagnostics: 'offline',
+        });
         updater.emit('update-not-available');
         expect(controller.getState().status).toBe('current');
         updater.emit('error', new Error('signature mismatch'));
         expect(controller.getState()).toMatchObject({
             status: 'error',
-            error: 'signature mismatch',
+            errorKind: 'signature',
+            diagnostics: 'signature mismatch',
         });
         await controller.check();
         expect(updater.checkForUpdates).toHaveBeenCalledTimes(2);
@@ -146,5 +156,37 @@ describe('self-update support', () => {
         expect(supportsSelfUpdate(true, 'linux', { APPIMAGE: '/x.AppImage' })).toBe(true);
         expect(supportsSelfUpdate(true, 'linux', {})).toBe(false);
         expect(supportsSelfUpdate(false, 'win32', {})).toBe(false);
+    });
+});
+
+describe('update error descriptions', () => {
+    it('explains a 404 from the feed without showing the bare status code', () => {
+        const described = describeUpdateError(
+            new Error(
+                'Cannot find latest.yml in the latest release artifacts (https://x): HttpError: 404',
+            ),
+        );
+        expect(described.errorKind).toBe('feed-not-found');
+        expect(described.error).not.toMatch(/404/);
+        expect(described.diagnostics).toMatch(/404/);
+    });
+
+    it('classifies network and integrity failures and scrubs credentials', () => {
+        expect(describeUpdateError(new Error('getaddrinfo ENOTFOUND github.com')).errorKind).toBe(
+            'network',
+        );
+        expect(describeUpdateError(new Error('sha512 checksum mismatch')).errorKind).toBe(
+            'integrity',
+        );
+        expect(describeUpdateError(new Error('bad token=ghp_secret123')).diagnostics).not.toMatch(
+            /ghp_secret123/,
+        );
+    });
+
+    it('attaches the version, platform and architecture the update is matched to', async () => {
+        const { controller } = setup({
+            context: { currentVersion: '0.6.0', platform: 'darwin', arch: 'x64' },
+        });
+        expect(controller.getState()).toMatchObject({ arch: 'x64', platform: 'darwin' });
     });
 });

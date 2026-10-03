@@ -19,7 +19,6 @@ import { createRequire } from 'node:module';
 import { execFileSync, spawnSync } from 'node:child_process';
 import {
     appendFileSync,
-    mkdirSync,
     mkdtempSync,
     readFileSync,
     readdirSync,

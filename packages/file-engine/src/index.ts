@@ -18,3 +18,4 @@ export * from './source';
 export * from './spool';
 export * from './testing';
 export * from './writer';
+export * from './sink';

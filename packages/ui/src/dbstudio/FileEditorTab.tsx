@@ -17,6 +17,7 @@ import { useMemo, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { selectionBounds, selectionSize } from '@httpreq/editor-core';
 import type { DbItemText } from '@httpreq/shared';
 import { CodeEditor } from '../editor/CodeEditor';
+import { handlingFor } from './largeFile';
 import { formatSize } from '../format';
 import {
     ActionIcon,
@@ -538,7 +539,7 @@ export function FileEditorTab({ tab }: { tab: FileTab }) {
                     </form>
                 )}
                 <div className="flex-1" />
-                {tab.file.size <= 8 * 1024 * 1024 && (
+                {handlingFor(tab.file.size) !== 'stream' && (
                     <SegmentedControl
                         size="xs"
                         aria-label="Editor"
@@ -602,6 +603,19 @@ export function FileEditorTab({ tab }: { tab: FileTab }) {
 
             {tab.findOpen && <FindBar key={tab.id} tab={tab} />}
 
+            {tab.mode === 'text' && handlingFor(tab.file.size) === 'large-file-mode' && (
+                <div
+                    role="status"
+                    className="flex h-6 flex-none items-center gap-2 border-b border-line bg-warning-soft px-3 text-xs"
+                >
+                    <strong>Large File Mode</strong>
+                    <span className="text-dimmed">
+                        Prioritizing stability over advanced editor features: highlighting, folding
+                        and suggestions are off.
+                    </span>
+                </div>
+            )}
+
             {/* Editor */}
             <div className="relative flex min-h-0 flex-1">
                 {tab.mode === 'text' && tab.text ? (
@@ -612,6 +626,7 @@ export function FileEditorTab({ tab }: { tab: FileTab }) {
                         language={monacoLanguage(language)}
                         ariaLabel={`Editing ${tab.file.name}`}
                         purpose={{ kind: 'output' }}
+                        largeFile={handlingFor(tab.file.size) === 'large-file-mode'}
                     />
                 ) : (
                     <VirtualViewer

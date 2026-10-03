@@ -28,6 +28,7 @@ const { version } = require('../../package.json');
 
 const { describeMacSigning } = require('./scripts/mac-signing.cjs');
 const afterSign = require('./scripts/after-sign.cjs').default;
+const afterPack = require('./scripts/after-pack.cjs').default;
 
 /**
  * A Developer ID certificate is available (CI passes it as CSC_LINK; locally CSC_NAME picks one
@@ -62,7 +63,12 @@ module.exports = {
     // by reading that file from the latest GitHub Release, downloads it in the background, checks
     // its SHA-512 against the metadata and installs it on the next restart.
     publish: [
-        { provider: 'github', owner: 'yamatrireddy', repo: 'httpreq', releaseType: 'release' },
+        {
+            provider: 'github',
+            owner: 'probuildr-solutions',
+            repo: 'httpreq',
+            releaseType: 'release',
+        },
     ],
     asar: true,
     // The renderer is copied into the asar as `renderer/`, which is where the main process loads it.
@@ -75,6 +81,8 @@ module.exports = {
     ],
     removePackageScripts: true,
     removePackageKeywords: true,
+    // Drops optional native modules built for the wrong CPU architecture, before signing.
+    afterPack,
     // Runs right after the app is signed (and notarized, when credentials are present); fails a
     // Developer ID build that could not be notarized instead of letting it ship.
     afterSign,

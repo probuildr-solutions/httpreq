@@ -26,6 +26,10 @@ export interface MongoConnectOptions {
     appName?: string;
     tls: TlsConfig;
     connectTimeoutMs: number;
+    /** `primary` (the default), `primaryPreferred`, `secondary`, `secondaryPreferred` or `nearest`. */
+    readPreference?: string;
+    /** Applied to write commands that do not carry their own. */
+    writeConcern?: { w?: string | number; wtimeoutMS?: number; journal?: boolean };
 }
 
 /** What the server said about itself. */
@@ -36,6 +40,10 @@ export interface MongoServerHello {
     maxMessageSizeBytes: number;
     /** The replica set name, when the server belongs to one. */
     setName?: string;
+    /** The primary of the replica set as `host:port`, as this member reports it. */
+    primary?: string;
+    /** The members of the replica set, as `host:port`. */
+    hosts?: string[];
     /** Whether this member accepts writes (a primary or a standalone). */
     writable: boolean;
     /** `mongos` for a router, `mongod` otherwise. */
@@ -89,6 +97,8 @@ export class MongoConnection {
     /** The user the server authenticated, when a login was made. */
     authenticatedUser?: string;
 
+    private options!: MongoConnectOptions;
+
     private constructor() {}
 
     static async connect(
@@ -96,6 +106,7 @@ export class MongoConnection {
         signal?: AbortSignal,
     ): Promise<MongoConnection> {
         const connection = new MongoConnection();
+        connection.options = options;
         const tlsFromStart = options.tls.mode !== 'disable' && options.tls.mode !== 'prefer';
         connection.pump = await SocketPump.open(options, { tlsFromStart, signal });
         try {
@@ -149,6 +160,10 @@ export class MongoConnection {
             maxBsonObjectSize: Number(hello.maxBsonObjectSize ?? 16 * 1024 * 1024),
             maxMessageSizeBytes: Number(hello.maxMessageSizeBytes ?? 48_000_000),
             setName: typeof hello.setName === 'string' ? hello.setName : undefined,
+            primary: typeof hello.primary === 'string' ? hello.primary : undefined,
+            hosts: Array.isArray(hello.hosts)
+                ? hello.hosts.filter((h): h is string => typeof h === 'string')
+                : undefined,
             writable: hello.isWritablePrimary === true || hello.ismaster === true,
             process: hello.msg === 'isdbgrid' ? 'mongos' : 'mongod',
         };
@@ -227,7 +242,7 @@ export class MongoConnection {
             throw new DbError('INTERNAL', 'The connection is busy with another command.');
         this.busy = true;
         try {
-            const body = encodeDocument({ ...command, $db: db });
+            const body = encodeDocument(this.decorate(command, db));
             if (body.length > this.hello.maxBsonObjectSize + 16 * 1024) {
                 throw new DbError(
                     'LIMIT_EXCEEDED',
@@ -248,6 +263,28 @@ export class MongoConnection {
         } finally {
             this.busy = false;
         }
+    }
+
+    /** Adds the read preference and default write concern the connection was opened with. */
+    private decorate(command: BsonDocument, db: string): BsonDocument {
+        const out: BsonDocument = { ...command, $db: db };
+        const mode = this.options.readPreference;
+        // A member that is not the primary (or a router) only answers reads that say they may.
+        if (mode && mode !== 'primary' && (!this.hello.writable || this.hello.process === 'mongos'))
+            out.$readPreference = { mode };
+        const concern = this.options.writeConcern;
+        if (
+            concern &&
+            out.writeConcern === undefined &&
+            ('insert' in out || 'update' in out || 'delete' in out || 'findAndModify' in out)
+        ) {
+            const wc: BsonDocument = {};
+            if (concern.w !== undefined) wc.w = concern.w;
+            if (concern.wtimeoutMS !== undefined) wc.wtimeout = concern.wtimeoutMS;
+            if (concern.journal !== undefined) wc.j = concern.journal;
+            if (Object.keys(wc).length) out.writeConcern = wc;
+        }
+        return out;
     }
 
     private async readReply(requestId: number): Promise<BsonDocument> {

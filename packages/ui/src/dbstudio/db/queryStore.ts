@@ -50,7 +50,14 @@ export interface QueryTab {
     id: string;
     title: string;
     profileId: string | null;
+    /** The database and schema this tab's statements run in, when it has chosen one. */
+    database: string | null;
+    schema: string | null;
     text: string;
+    /** The text as last saved to `source` (or empty for a tab that was never saved). */
+    savedText: string;
+    /** The file this tab was opened from or saved to: an opaque token and its name, never a path. */
+    source: { token: string; name: string } | null;
     /** The host's id for the statement whose result is shown. */
     runId: string | null;
     snapshot: DbQuerySnapshot | null;
@@ -76,6 +83,9 @@ interface QueryState {
 export const useQueries = create<QueryState>(() => ({ tabs: {} }));
 
 export const resetQueries = () => useQueries.setState({ tabs: {} });
+
+/** Whether a query tab holds text that is not in its file (or, for a new tab, any text at all). */
+export const isQueryDirty = (tab: QueryTab): boolean => tab.text !== tab.savedText;
 
 export const isQueryTabId = (id: string): boolean => /^q[0-9a-f]{16}$/.test(id);
 

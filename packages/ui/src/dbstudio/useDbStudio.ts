@@ -14,6 +14,7 @@ import {
 import type {
     DbItemText,
     DbLine,
+    DbFileRef,
     DbLineEnding,
     DbSavePiece,
     DbSearchQuery,
@@ -23,9 +24,9 @@ import { copyText, readClipboardText } from '../clipboard';
 import { isQueryTabId } from './db/queryStore';
 import { confirmAction } from '../confirm';
 import { notifications } from '../kit';
+import { handlingFor, largeFileLimits } from './largeFile';
 import { clearJournal, readJournal, writeJournal } from './journal';
 import {
-    FULL_EDIT_BYTES,
     ITEMS_PAGE,
     MAX_DISPLAYED_HITS,
     isDirty,
@@ -45,12 +46,36 @@ export interface ViewRow {
     edited: boolean;
 }
 
+export type SaveTextResult =
+    | { kind: 'saved'; token: string; name: string }
+    | { kind: 'cancelled' }
+    | { kind: 'failed'; message: string };
+
 export interface DbStudioApi {
     readonly available: boolean;
 
     /* Files and tabs */
+    /** Shows the native file picker, then the Open file dialog for the chosen file. */
     openFile: () => Promise<void>;
-    closeTab: (id: string) => Promise<void>;
+    /** Opens the file the dialog is showing: in the file editor, or only in the line viewer. */
+    openPending: (options?: { preview?: boolean }) => Promise<void>;
+    /**
+     * The whole text of the file the dialog is showing (small files only), with the token that
+     * stands for it so the query tab it becomes can be saved back to the same file; `null` when
+     * it cannot be read.
+     */
+    readPendingText: () => Promise<{ text: string; token: string; name: string } | null>;
+    /** Saves query text to a file (to the one `token` stands for, else after a save dialog). */
+    saveText: (
+        token: string | null,
+        suggestedName: string,
+        text: string,
+    ) => Promise<SaveTextResult>;
+    cancelPending: () => void;
+    /** Shows the file dialog and returns the chosen file (a token, never a path), or null. */
+    pickFile: () => Promise<DbFileRef | null>;
+    /** Closes a file tab. A tab with unsaved changes asks first, unless `discard` is set. */
+    closeTab: (id: string, options?: { discard?: boolean }) => Promise<void>;
     activateTab: (id: string) => void;
     setMode: (id: string, mode: EditorMode) => Promise<void>;
 
@@ -96,6 +121,11 @@ export interface DbStudioApi {
 const UNAVAILABLE: DbStudioApi = {
     available: false,
     openFile: async () => undefined,
+    openPending: async () => undefined,
+    readPendingText: async () => null,
+    saveText: async () => ({ kind: 'failed', message: 'Saving is part of the desktop app.' }),
+    cancelPending: () => undefined,
+    pickFile: async () => null,
     closeTab: async () => undefined,
     activateTab: () => undefined,
     setMode: async () => undefined,
@@ -446,62 +476,134 @@ export function useDbStudioManager(bridge: DbStudioBridge | undefined): DbStudio
             const picked = await bridge.pickFile();
             if (!picked.ok) return void store.setState({ error: picked.error.message });
             if (!picked.value) return; // cancelled
-            const opened = await bridge.openFile(picked.value.token);
-            if (!opened.ok) return void store.setState({ error: opened.error.message });
-            const file = opened.value;
-            const tab: FileTab = {
-                id: file.fileId,
-                file,
-                progress: null,
-                analyzed: null,
-                itemsProgress: null,
-                itemsView: null,
-                mode: 'viewer',
-                text: null,
-                table: null,
-                version: 0,
-                lineCount: 0,
-                topLine: 0,
-                selection: null,
-                reveal: null,
-                findOpen: false,
-                search: null,
-                panel: 'none',
-                working: null,
-                error: null,
-                notice: null,
-                journal: null,
-            };
-            store.setState((state) => ({
-                tabs: { ...state.tabs, [tab.id]: tab },
-                order: [...state.order, tab.id],
-                activeId: tab.id,
-            }));
-
-            // Small files open in the full text editor (when they are valid text).
-            if (file.size <= FULL_EDIT_BYTES) {
-                const text = await bridge.readText(file.fileId);
-                if (text.ok && !text.value.lossy && getTab(file.fileId)) {
-                    patchTab(file.fileId, {
-                        mode: 'text',
-                        text: { current: text.value.text, saved: text.value.text },
-                        journal: readJournal(file.fileKey, file),
-                    });
-                }
-            }
-            const analyzed = await bridge.analyzeFile(file.fileId, 'auto');
-            if (analyzed.ok && getTab(file.fileId))
-                patchTab(file.fileId, { analyzed: analyzed.value });
+            // Only its name and size are known now; what to do with it is asked next.
+            store.setState({ pending: picked.value });
         } finally {
             store.setState({ opening: false });
         }
     }, [bridge]);
 
+    const pickFile = useCallback(async (): Promise<DbFileRef | null> => {
+        if (!bridge) return null;
+        const picked = await bridge.pickFile();
+        if (!picked.ok) {
+            store.setState({ error: picked.error.message });
+            return null;
+        }
+        return picked.value;
+    }, [bridge]);
+
+    const cancelPending = useCallback(() => store.setState({ pending: null }), []);
+
+    const saveText = useCallback(
+        async (
+            token: string | null,
+            suggestedName: string,
+            text: string,
+        ): Promise<SaveTextResult> => {
+            if (!bridge) return { kind: 'failed', message: 'Saving is part of the desktop app.' };
+            const result = await bridge.saveText(token, suggestedName, text);
+            if (!result.ok) return { kind: 'failed', message: result.error.message };
+            if (!result.value) return { kind: 'cancelled' };
+            return { kind: 'saved', token: result.value.token, name: result.value.name };
+        },
+        [bridge],
+    );
+
+    const readPendingText = useCallback(async (): Promise<{
+        text: string;
+        token: string;
+        name: string;
+    } | null> => {
+        const pending = store.getState().pending;
+        if (!bridge || !pending || pending.size > largeFileLimits().monacoMaxBytes) return null;
+        const opened = await bridge.openFile(pending.token);
+        if (!opened.ok) {
+            store.setState({ error: opened.error.message });
+            return null;
+        }
+        try {
+            const text = await bridge.readText(opened.value.fileId);
+            if (!text.ok) {
+                store.setState({ error: text.error.message });
+                return null;
+            }
+            if (text.value.lossy) {
+                store.setState({ error: 'The file is not valid text, so it cannot be edited.' });
+                return null;
+            }
+            store.setState({ pending: null });
+            return { text: text.value.text, token: pending.token, name: pending.name };
+        } finally {
+            void bridge.closeFile(opened.value.fileId);
+        }
+    }, [bridge]);
+
+    const openPending = useCallback(
+        async ({ preview = false }: { preview?: boolean } = {}) => {
+            const pending = store.getState().pending;
+            if (!bridge || !pending || store.getState().opening) return;
+            store.setState({ opening: true, error: null });
+            try {
+                const opened = await bridge.openFile(pending.token);
+                if (!opened.ok) return void store.setState({ error: opened.error.message });
+                store.setState({ pending: null });
+                const file = opened.value;
+                const tab: FileTab = {
+                    id: file.fileId,
+                    file,
+                    progress: null,
+                    analyzed: null,
+                    itemsProgress: null,
+                    itemsView: null,
+                    mode: 'viewer',
+                    text: null,
+                    table: null,
+                    version: 0,
+                    lineCount: 0,
+                    topLine: 0,
+                    selection: null,
+                    reveal: null,
+                    findOpen: false,
+                    search: null,
+                    panel: 'none',
+                    working: null,
+                    error: null,
+                    notice: null,
+                    journal: null,
+                };
+                store.setState((state) => ({
+                    tabs: { ...state.tabs, [tab.id]: tab },
+                    order: [...state.order, tab.id],
+                    activeId: tab.id,
+                }));
+
+                // Small files open in the full text editor (when they are valid text).
+                if (!preview && handlingFor(file.size) !== 'stream') {
+                    const text = await bridge.readText(file.fileId);
+                    if (text.ok && !text.value.lossy && getTab(file.fileId)) {
+                        patchTab(file.fileId, {
+                            mode: 'text',
+                            text: { current: text.value.text, saved: text.value.text },
+                            journal: readJournal(file.fileKey, file),
+                        });
+                    }
+                }
+                const analyzed = await bridge.analyzeFile(file.fileId, 'auto');
+                if (analyzed.ok && getTab(file.fileId))
+                    patchTab(file.fileId, { analyzed: analyzed.value });
+            } finally {
+                store.setState({ opening: false });
+            }
+        },
+        [bridge],
+    );
+
     const closeTab = useCallback(
-        async (id: string) => {
+        async (id: string, options: { discard?: boolean } = {}) => {
             const tab = getTab(id);
             if (!tab) return;
-            if (isDirty(tab)) {
+            if (isDirty(tab) && !options.discard) {
                 const answer = await confirmAction({
                     title: `Close ${tab.file.name}?`,
                     message:
@@ -510,7 +612,7 @@ export function useDbStudioManager(bridge: DbStudioBridge | undefined): DbStudio
                     danger: true,
                 });
                 if (answer !== 'confirm') return;
-            } else {
+            } else if (!isDirty(tab)) {
                 clearJournal(tab.file.fileKey);
             }
             clearTimeout(journalTimers.current.get(id));
@@ -553,7 +655,7 @@ export function useDbStudioManager(bridge: DbStudioBridge | undefined): DbStudio
                 return;
             }
             if (mode === 'text') {
-                if (tab.file.size > FULL_EDIT_BYTES) return;
+                if (handlingFor(tab.file.size) === 'stream') return;
                 const text = await bridge.readText(id);
                 if (!text.ok) return void patchTab(id, { error: text.error.message });
                 if (text.value.lossy) {
@@ -972,6 +1074,11 @@ export function useDbStudioManager(bridge: DbStudioBridge | undefined): DbStudio
                 ? {
                       available: true,
                       openFile,
+                      openPending,
+                      readPendingText,
+                      saveText,
+                      cancelPending,
+                      pickFile,
                       closeTab,
                       activateTab,
                       setMode,
@@ -1005,6 +1112,11 @@ export function useDbStudioManager(bridge: DbStudioBridge | undefined): DbStudio
         [
             bridge,
             openFile,
+            openPending,
+            readPendingText,
+            saveText,
+            cancelPending,
+            pickFile,
             closeTab,
             activateTab,
             setMode,

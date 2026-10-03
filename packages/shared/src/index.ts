@@ -193,7 +193,7 @@ export const serializeError = (error: unknown, fallback: SerializedAppError): Se
     error instanceof AppError ? { code: error.code, message: error.message } : fallback;
 
 /** Project documentation; the only external URL the desktop shell will open. */
-export const DOCUMENTATION_URL = 'https://github.com/yamatrireddy/httpreq';
+export const DOCUMENTATION_URL = 'https://github.com/probuildr-solutions/httpreq';
 
 /**
  * Lightweight reachability probe (an empty 204 response, as used for captive-portal detection).
@@ -268,9 +268,9 @@ export interface BuildInfo {
 }
 
 /** Where published releases live; the desktop app checks it for newer versions. */
-export const RELEASES_URL = 'https://github.com/yamatrireddy/httpreq/releases';
+export const RELEASES_URL = 'https://github.com/probuildr-solutions/httpreq/releases';
 export const LATEST_RELEASE_API =
-    'https://api.github.com/repos/yamatrireddy/httpreq/releases/latest';
+    'https://api.github.com/repos/probuildr-solutions/httpreq/releases/latest';
 
 export interface AppInfo {
     name: string;
@@ -291,6 +291,7 @@ export type DesktopUpdateStatus =
     | 'available'
     | 'downloading'
     | 'ready'
+    | 'installing'
     | 'current'
     | 'error'
     | 'unsupported';
@@ -301,9 +302,20 @@ export interface DesktopUpdateState {
     version?: string;
     /** Download progress, 0 to 100, while `downloading`. */
     percent?: number;
-    /** What went wrong, when `error`. The installed version keeps working. */
+    /** What went wrong, when `error`, in words for the user. The installed version keeps working. */
     error?: string;
+    /** Why the update failed, so the UI can offer the right next step. */
+    errorKind?: DesktopUpdateErrorKind;
+    /** The technical detail behind `error`: shown on request for diagnostics, never a secret. */
+    diagnostics?: string;
+    /** The running version, the platform and the CPU architecture the update is matched to. */
+    currentVersion?: string;
+    platform?: string;
+    arch?: string;
 }
+
+export type DesktopUpdateErrorKind =
+    'feed-not-found' | 'network' | 'integrity' | 'signature' | 'unknown';
 
 export const DESKTOP_UPDATE_STATUSES: readonly DesktopUpdateStatus[] = [
     'idle',
@@ -311,6 +323,7 @@ export const DESKTOP_UPDATE_STATUSES: readonly DesktopUpdateStatus[] = [
     'available',
     'downloading',
     'ready',
+    'installing',
     'current',
     'error',
     'unsupported',
@@ -388,3 +401,5 @@ export interface HttpReqBridge {
     mqtt?: MqttBridge;
     dbStudio?: DbStudioBridge;
 }
+export * from './connectionString';
+export * from './connectionErrors';

@@ -423,7 +423,7 @@ describe('editing through the host', () => {
         const big = new FileHostService({
             openSource: async () => ({
                 source: {
-                    size: 9 * 1024 * 1024,
+                    size: 65 * 1024 * 1024,
                     mtimeMs: 1,
                     readInto: async () => 0,
                     close: async () => undefined,

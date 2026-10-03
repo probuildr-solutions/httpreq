@@ -28,7 +28,7 @@ describe('githubReleaseCheck', () => {
     it('reports a newer release with its page', async () => {
         const fetcher = respond(200, {
             tag_name: 'v0.2.0',
-            html_url: 'https://github.com/yamatrireddy/httpreq/releases/tag/v0.2.0',
+            html_url: 'https://github.com/probuildr-solutions/httpreq/releases/tag/v0.2.0',
             body: 'Notes',
         });
         const update = await githubReleaseCheck(fetcher)(current, signal);
@@ -36,7 +36,7 @@ describe('githubReleaseCheck', () => {
         expect(update).toEqual({
             version: '0.2.0',
             kind: 'release',
-            url: 'https://github.com/yamatrireddy/httpreq/releases/tag/v0.2.0',
+            url: 'https://github.com/probuildr-solutions/httpreq/releases/tag/v0.2.0',
             notes: 'Notes',
         });
     });
@@ -52,7 +52,7 @@ describe('githubReleaseCheck', () => {
         const update = await githubReleaseCheck(
             respond(200, { tag_name: '9.0.0', html_url: 'https://evil.example/download' }),
         )(current, signal);
-        expect(update?.url).toBe('https://github.com/yamatrireddy/httpreq/releases');
+        expect(update?.url).toBe('https://github.com/probuildr-solutions/httpreq/releases');
     });
 
     it('fails loudly on server errors', async () => {

@@ -32,6 +32,7 @@
         "@httpreq/codegen": "*",
         "@httpreq/editor-core": "*",
         "@httpreq/sql-parser": "*",
+        "@httpreq/db-admin": "*",
         "@httpreq/document-engine": "*"
     }
 }

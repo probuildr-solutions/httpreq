@@ -9,6 +9,7 @@ import {
     applyIndentation,
     AUTHORING_OPTIONS,
     BASE_EDITOR_OPTIONS,
+    LARGE_FILE_OPTIONS,
     READ_ONLY_OPTIONS,
 } from './editorOptions';
 import { EditorLoading } from './EditorLoading';
@@ -29,6 +30,11 @@ interface Props {
      * is output unless it says otherwise.
      */
     purpose?: EditorPurpose;
+    /**
+     * Large File Mode: expensive features off and no syntax highlighting, for a document too big
+     * for the editor to treat as code. Switching it on a mounted editor reconfigures it in place.
+     */
+    largeFile?: boolean;
     className?: string;
     /** Receives the editor instance, e.g. to run "Format Document". */
     onEditor?: (instance: editor.IStandaloneCodeEditor) => void;
@@ -49,6 +55,7 @@ export function CodeEditor({
     ariaLabel,
     readOnly,
     purpose,
+    largeFile,
     className,
     onEditor,
 }: Props) {
@@ -57,6 +64,7 @@ export function CodeEditor({
         () => ({
             ...BASE_EDITOR_OPTIONS,
             ...(readOnly ? READ_ONLY_OPTIONS : AUTHORING_OPTIONS),
+            ...(largeFile ? LARGE_FILE_OPTIONS : {}),
             ariaLabel,
             padding: readOnly ? READ_ONLY_OPTIONS.padding : { top: 10 },
             formatOnPaste: !readOnly && language === 'json',
@@ -65,7 +73,7 @@ export function CodeEditor({
                 ? { quickSuggestions: { other: true, comments: false, strings: true } }
                 : {}),
         }),
-        [ariaLabel, readOnly, language],
+        [ariaLabel, readOnly, language, largeFile],
     );
     const resolved: EditorPurpose = purpose ?? (readOnly ? { kind: 'output' } : { kind: 'body' });
     const purposeKey = resolved.kind === 'script' ? `script:${resolved.stage}` : resolved.kind;
@@ -102,7 +110,7 @@ export function CodeEditor({
         <div className={cx('overflow-hidden rounded-sm border border-line', className)}>
             <Suspense fallback={<EditorLoading />}>
                 <Editor
-                    language={language}
+                    language={largeFile ? 'plaintext' : language}
                     theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
                     value={value}
                     onChange={handleChange}

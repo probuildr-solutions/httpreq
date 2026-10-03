@@ -27,6 +27,7 @@ import {
 import { splitShellStatements } from '@httpreq/mongo-engine';
 import { splitCommandLines } from '@httpreq/redis-engine';
 import type { SqlDialect } from '@httpreq/sql-parser';
+import { TaskService } from './taskService';
 import { integer, optionalText, parseConnectionConfig, record, text } from './validate';
 
 export interface DbHostContext {
@@ -41,6 +42,8 @@ export interface DbHostOptions {
     /** Largest a single result may grow on disk. */
     maxSpoolBytes?: number;
     keepAliveMs?: number;
+    /** Least time between two progress snapshots of one background task. */
+    taskProgressIntervalMs?: number;
 }
 
 /** Pushed when a statement's state or progress changes. */
@@ -101,6 +104,7 @@ export class DbHostService {
     private readonly scripts = new Map<string, { run: ScriptRun; reader: ChunkReader }>();
     private readonly spoolDirectory: string;
     private emit: DbHostContext['emit'] = () => undefined;
+    private readonly taskService: TaskService;
 
     constructor(private readonly options: DbHostOptions) {
         for (const provider of options.providers) this.registry.register(provider);
@@ -115,6 +119,9 @@ export class DbHostService {
             } satisfies ConnectionStatusEvent),
         );
         this.spoolDirectory = options.spoolDirectory ?? join(tmpdir(), 'httpreq-db-spool');
+        this.taskService = new TaskService(this.connections, () => this.emit, {
+            minIntervalMs: options.taskProgressIntervalMs,
+        });
     }
 
     /** The dispatcher a worker server calls with each request. */
@@ -236,6 +243,16 @@ export class DbHostService {
                 await this.closeScript(id(request.scriptId, 'The script'));
                 return {};
 
+            case 'task.export':
+            case 'task.import':
+            case 'task.script':
+            case 'task.list':
+            case 'task.cancel':
+            case 'task.pause':
+            case 'task.resume':
+            case 'task.remove':
+                return this.taskService.handle(op, request);
+
             case 'host.stats':
                 return {
                     connections: this.connections.list().length,
@@ -248,6 +265,7 @@ export class DbHostService {
     };
 
     async dispose(): Promise<void> {
+        await this.taskService.dispose();
         await Promise.all([...this.runs.keys()].map((queryId) => this.closeQuery(queryId)));
         await Promise.all([...this.scripts.keys()].map((scriptId) => this.closeScript(scriptId)));
         await this.connections.closeAll();

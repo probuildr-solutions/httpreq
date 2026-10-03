@@ -35,6 +35,12 @@ export type Plan =
           helper: string;
           /** The command can be wrapped in `explain`. */
           explainable: boolean;
+          /**
+           * `.asDocuments()`: the result is one `document` column holding each whole document,
+           * for editors that need every field exactly (a table would drop fields past the 40th and
+           * cannot tell a missing field from a null one).
+           */
+          documents?: boolean;
       };
 
 const fail = (message: string): never => {
@@ -170,9 +176,18 @@ const readChain = (text: string, from: number): Chain[] => {
  * Turns one shell statement into a plan: a database command and how to show its result.
  * `current` is the database in use (`use` changes it between statements).
  */
-export const parseStatement = (source: string, current: string): Plan => {
-    const text = stripLeading(source).replace(/;\s*$/, '').trim();
+export const parseStatement = (source: string, currentDatabase: string): Plan => {
+    let text = stripLeading(source).replace(/;\s*$/, '').trim();
+    let current = currentDatabase;
     if (!text) return fail('There is nothing to run.');
+
+    // db.getSiblingDB("other").coll.find(): the statement runs on another database without `use`,
+    // which would change the database every other tab on this connection runs in.
+    const sibling = /^db\s*\.\s*getSiblingDB\s*\(\s*(["'])([^"'\\]+)\1\s*\)/.exec(text);
+    if (sibling) {
+        current = sibling[2]!;
+        text = `db${text.slice(sibling[0].length)}`;
+    }
 
     const use = /^use\s+([^\s;]+)\s*$/i.exec(text);
     if (use) return { kind: 'use', database: use[1]!.replace(/^["']|["']$/g, '') };
@@ -349,6 +364,8 @@ const collectionMethod = (collection: string, chain: Chain[], current: string): 
             }
             for (const step of modifiers) applyFindModifier(body, step);
             plan = run(body, 'cursor', {}, true);
+            if (modifiers.some((step) => step.name === 'asDocuments') && plan.kind === 'command')
+                plan.documents = true;
             break;
         }
         case 'aggregate': {
@@ -623,6 +640,7 @@ const applyFindModifier = (body: BsonDocument, step: Chain): void => {
             break;
         case 'toArray':
         case 'pretty':
+        case 'asDocuments':
             break;
         default:
             fail(`“.${step.name}()” cannot follow find().`);

@@ -4,13 +4,15 @@
  */
 
 import {
+    BrowserWindow,
+    dialog,
     ipcMain,
     utilityProcess,
     webContents,
     type IpcMainEvent,
     type IpcMainInvokeEvent,
 } from 'electron';
-import { join } from 'node:path';
+import { basename, dirname, extname, join } from 'node:path';
 import { DbError, toDbError } from '@httpreq/db-core';
 import { WorkerSupervisor, type WorkerTransport } from '@httpreq/db-workers';
 import { DB_HOST_OPS, redact, type DbResult } from '@httpreq/shared';
@@ -34,6 +36,8 @@ export interface DbConnectionsDeps {
     credentials: CredentialStore;
     /** The path of a file the given window opened, by file id (for script runs). */
     pathOfFile: (senderId: number, fileId: string) => string | undefined;
+    /** The path a file token (from the file dialog) stands for in this window, or undefined. */
+    pathOfToken: (senderId: number, token: unknown) => string | undefined;
 }
 
 const ALLOWED = new Set<string>(DB_HOST_OPS);
@@ -55,6 +59,9 @@ const transport = (modulePath: string, spoolDirectory: string): WorkerTransport 
     };
 };
 
+/** Thrown when the user closes the save dialog: nothing starts, and that is not an error. */
+class TaskNotStarted extends Error {}
+
 const isId = (value: unknown): value is string =>
     typeof value === 'string' && /^[0-9a-f]{16}$/.test(value);
 const object = (value: unknown): Record<string, unknown> =>
@@ -68,6 +75,7 @@ export const registerDbConnections = ({
     userDataPath,
     credentials,
     pathOfFile,
+    pathOfToken,
 }: DbConnectionsDeps) => {
     const spoolDirectory = join(userDataPath, 'db-spool');
     const host = new WorkerSupervisor({
@@ -75,6 +83,21 @@ export const registerDbConnections = ({
         factory: () => transport(hostPath, spoolDirectory),
         // Statements and scripts can legitimately run for hours.
         cancelGraceMs: 10_000,
+        onStatus: (status) => {
+            // A host that stopped took its background tasks with it; their windows are told so the
+            // task center does not show them running for ever.
+            if (status.state === 'crashed' || status.state === 'failed') {
+                for (const owner of new Set(taskOwner.values())) {
+                    send(owner, {
+                        topic: 'task.lost',
+                        payload: {
+                            reason: 'The database process stopped unexpectedly, so running tasks were stopped.',
+                        },
+                    });
+                }
+                taskOwner.clear();
+            }
+        },
     });
 
     /** Who owns what, so one window cannot reach another's connections, queries or scripts. */
@@ -83,6 +106,8 @@ export const registerDbConnections = ({
     /** Which connection each query runs on, so closing a connection forgets its queries. */
     const queryConnection = new Map<string, string>();
     const scriptOwner = new Map<string, number>();
+    /** Which window started each background task. */
+    const taskOwner = new Map<string, number>();
 
     const send = (senderId: number, payload: unknown) => {
         const contents = webContents.fromId(senderId);
@@ -98,7 +123,9 @@ export const registerDbConnections = ({
                   ? queryOwner.get(String(body.queryId))
                   : topic === 'script.progress'
                     ? scriptOwner.get(String(body.scriptId))
-                    : undefined;
+                    : topic === 'task.state'
+                      ? taskOwner.get(String(object(body.snapshot).id))
+                      : undefined;
         if (owner !== undefined) send(owner, { topic, payload });
     });
 
@@ -157,7 +184,62 @@ export const registerDbConnections = ({
             void _ignored;
             return { ...rest, path };
         }
+        if (
+            op === 'task.cancel' ||
+            op === 'task.pause' ||
+            op === 'task.resume' ||
+            op === 'task.remove'
+        ) {
+            if (!isId(payload.taskId) || taskOwner.get(payload.taskId) !== senderId)
+                throw new DbError('NOT_FOUND', 'That task does not belong to this window.');
+        }
+        if (op === 'task.export' || op === 'task.import' || op === 'task.script') {
+            if (!isId(payload.taskId)) throw new DbError('INVALID_REQUEST', 'The task is invalid.');
+            return prepareTask(op, payload, senderId);
+        }
         return payload;
+    };
+
+    /** Where an export goes is chosen in a native dialog; what an import reads is a file the user picked. */
+    const prepareTask = async (op: string, payload: Record<string, unknown>, senderId: number) => {
+        const contents = webContents.fromId(senderId);
+        const window = contents ? BrowserWindow.fromWebContents(contents) : null;
+        if (op === 'task.export') {
+            const format = typeof payload.format === 'string' ? payload.format : 'csv';
+            const name = (
+                typeof payload.suggestedName === 'string' ? payload.suggestedName : 'export'
+            )
+                .replace(/[^A-Za-z0-9._ -]/g, '_')
+                .slice(0, 100);
+            const options = {
+                title: 'Export to a file',
+                defaultPath: `${name || 'export'}.${format}`,
+                filters: [
+                    { name: format.toUpperCase(), extensions: [format] },
+                    { name: 'All files', extensions: ['*'] },
+                ],
+            };
+            const chosen = window
+                ? await dialog.showSaveDialog(window, options)
+                : await dialog.showSaveDialog(options);
+            if (chosen.canceled || !chosen.filePath) throw new TaskNotStarted();
+            const { suggestedName: ignored, ...rest } = payload;
+            void ignored;
+            return { ...rest, path: chosen.filePath };
+        }
+        const path = pathOfToken(senderId, payload.fileToken);
+        if (!path)
+            throw new DbError(
+                'NOT_FOUND',
+                'That file was not chosen in this window. Choose it again.',
+            );
+        const { fileToken: token, ...rest } = payload;
+        void token;
+        if (op === 'task.import' && payload.saveRejects === true) {
+            const base = basename(path, extname(path));
+            return { ...rest, path, rejectsPath: join(dirname(path), `${base}.rejects.ndjson`) };
+        }
+        return { ...rest, path };
     };
 
     ipcMain.handle(
@@ -181,6 +263,11 @@ export const registerDbConnections = ({
                 }
                 if (op === 'script.start' && isId(body.scriptId))
                     scriptOwner.set(body.scriptId, senderId);
+                if (
+                    (op === 'task.export' || op === 'task.import' || op === 'task.script') &&
+                    isId(body.taskId)
+                )
+                    taskOwner.set(body.taskId, senderId);
                 // A statement may run for hours; the host's own limits (not a timer here) govern it.
                 const value = await host.request(op, payload, {
                     timeoutMs: op === 'conn.test' || op === 'conn.open' ? 130_000 : 0,
@@ -198,9 +285,25 @@ export const registerDbConnections = ({
                     queryConnection.delete(body.queryId);
                 }
                 if (op === 'script.close' && isId(body.scriptId)) scriptOwner.delete(body.scriptId);
+                if (op === 'task.export' || op === 'task.import' || op === 'task.script')
+                    return { ok: true, value: { started: true, taskId: body.taskId } };
+                if (op === 'task.remove' && isId(body.taskId)) taskOwner.delete(body.taskId);
+                if (op === 'task.list' && Array.isArray(value))
+                    return {
+                        ok: true,
+                        value: value.filter(
+                            (task) => taskOwner.get(String(object(task).id)) === senderId,
+                        ),
+                    };
                 return { ok: true, value };
             } catch (error) {
+                if (error instanceof TaskNotStarted) return { ok: true, value: { started: false } };
                 // A request that failed to start leaves nothing to own.
+                if (
+                    (op === 'task.export' || op === 'task.import' || op === 'task.script') &&
+                    isId(body.taskId)
+                )
+                    taskOwner.delete(body.taskId);
                 if (op === 'query.start' && isId(body.queryId)) {
                     queryOwner.delete(body.queryId);
                     queryConnection.delete(body.queryId);
@@ -267,6 +370,12 @@ export const registerDbConnections = ({
             scriptOwner.delete(scriptId);
             void host.request('script.close', { scriptId }).catch(() => undefined);
         }
+        // Background tasks belong to the window that started them, and stop with it.
+        for (const [taskId, owner] of [...taskOwner]) {
+            if (owner !== senderId) continue;
+            taskOwner.delete(taskId);
+            void host.request('task.cancel', { taskId }).catch(() => undefined);
+        }
     };
 
     const dispose = async () => {
@@ -274,6 +383,7 @@ export const registerDbConnections = ({
         queryOwner.clear();
         queryConnection.clear();
         scriptOwner.clear();
+        taskOwner.clear();
         await host.stop();
     };
 

@@ -40,6 +40,12 @@
         },
         {
             "path": "../test-servers"
+        },
+        {
+            "path": "../transfer-engine"
+        },
+        {
+            "path": "../db-admin"
         }
     ]
 }

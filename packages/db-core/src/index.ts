@@ -8,3 +8,4 @@ export * from './errors';
 export * from './jobs';
 export * from './provider';
 export * from './rangeIndex';
+export * from './tasks';

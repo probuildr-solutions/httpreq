@@ -146,6 +146,22 @@ export class ConnectionManager {
         return this.reconnect(entry);
     }
 
+    /**
+     * A new session on the settings a connection was opened with, for work that must not share the
+     * connection's one session (a long export or import, which would otherwise make every query tab
+     * on that connection wait). The caller closes it; the manager does not track it.
+     */
+    async openDedicated(id: string, signal?: AbortSignal): Promise<Session> {
+        const entry = this.entries.get(id);
+        if (!entry) throw new DbError('NOT_FOUND', 'That connection is not open.');
+        return this.connect(entry, signal);
+    }
+
+    /** The engine a connection was opened for. */
+    engineOf(id: string): string | undefined {
+        return this.entries.get(id)?.config.engine;
+    }
+
     status(id: string): ConnectionStatus | undefined {
         return this.entries.get(id)?.status;
     }

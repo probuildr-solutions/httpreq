@@ -6,6 +6,8 @@
 import {
     IconArrowBackUp,
     IconCheck,
+    IconDeviceFloppy,
+    IconDownload,
     IconPlayerPlay,
     IconPlayerStop,
     IconPlayerTrackNext,
@@ -13,7 +15,7 @@ import {
     IconTransactionBitcoin,
 } from '@tabler/icons-react';
 import type { editor } from 'monaco-editor';
-import { useCallback, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { CodeEditor } from '../../editor/CodeEditor';
 import { Button, Select, Text, Tooltip, UnstyledButton, cx } from '../../kit';
 import { formatDuration } from '../../format';
@@ -29,6 +31,10 @@ import { useProfiles } from './profiles';
 import { useLive } from './queryStore';
 import { layoutOf } from './engines';
 import { useDbManager } from './useDbManager';
+import { useTabActions } from '../tabs/useTabActions';
+import { openAdminDialog } from '../admin/dialogStore';
+import { handlingFor } from '../largeFile';
+import { isQueryDirty } from './queryStore';
 
 const COUNT = new Intl.NumberFormat('en-US');
 
@@ -51,8 +57,65 @@ export function QueryTab({ id }: { id: string }) {
     const status = useLive((state) => state.status);
     const instance = useRef<editor.IStandaloneCodeEditor | null>(null);
 
+    const actions = useTabActions();
     const profile = profiles.find((p) => p.id === tab?.profileId);
     const layout = layoutOf(profile?.settings.engine ?? 'mysql');
+    const engineId = profile?.settings.engine;
+    const connectedProfile = tab?.profileId ? status[tab.profileId]?.state === 'connected' : false;
+
+    // The databases and schemas this tab can choose from, read when the connection is open.
+    const [databases, setDatabases] = useState<string[]>([]);
+    const [schemas, setSchemas] = useState<string[]>([]);
+    const profileId = tab?.profileId ?? null;
+    const database = tab?.database ?? null;
+    const { listMeta } = manager;
+    useEffect(() => {
+        let cancelled = false;
+        if (!profileId || !connectedProfile) {
+            setDatabases([]);
+            return;
+        }
+        void listMeta(profileId, 'databases')
+            .then((items) => {
+                if (cancelled) return;
+                let names = (items as { name: string; system: boolean }[])
+                    .filter((d) => !d.system)
+                    .map((d) => d.name);
+                // PostgreSQL statements run on the database the connection was opened with.
+                if (engineId === 'postgresql') {
+                    const own = profile?.settings.database || profile?.settings.username;
+                    names = names.filter((name) => name === own);
+                }
+                setDatabases(names);
+            })
+            .catch(() => !cancelled && setDatabases([]));
+        return () => {
+            cancelled = true;
+        };
+        // The profile's own settings only matter through the connection that was opened.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [profileId, connectedProfile, engineId, listMeta]);
+    useEffect(() => {
+        let cancelled = false;
+        const schemaDatabase = database ?? (engineId === 'postgresql' ? databases[0] : undefined);
+        if (!profileId || !connectedProfile || !layout.schemas || !schemaDatabase) {
+            setSchemas([]);
+            return;
+        }
+        void listMeta(profileId, 'schemas', { database: schemaDatabase })
+            .then((items) => {
+                if (!cancelled)
+                    setSchemas(
+                        (items as { name: string; system: boolean }[])
+                            .filter((schema) => !schema.system)
+                            .map((schema) => schema.name),
+                    );
+            })
+            .catch(() => !cancelled && setSchemas([]));
+        return () => {
+            cancelled = true;
+        };
+    }, [profileId, connectedProfile, database, databases, layout.schemas, engineId, listMeta]);
     const capabilities =
         manager.engines.find((engine) => engine.id === profile?.settings.engine)?.capabilities ??
         [];
@@ -86,6 +149,12 @@ export function QueryTab({ id }: { id: string }) {
     const snapshot = tab.snapshot;
 
     const onKeyDown = (event: React.KeyboardEvent) => {
+        if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+            event.preventDefault();
+            event.stopPropagation();
+            void actions.saveTab(id, { as: event.shiftKey });
+            return;
+        }
         if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
             // Captured, so the editor's own "insert line below" does not get the key first.
             event.preventDefault();
@@ -100,7 +169,7 @@ export function QueryTab({ id }: { id: string }) {
             onKeyDownCapture={onKeyDown}
             data-testid="query-tab"
         >
-            <div className="flex flex-none flex-wrap items-center gap-1.5 border-b border-line bg-chrome px-2 py-1">
+            <div className="box-border flex h-9 flex-none items-center gap-1.5 overflow-x-auto overflow-y-hidden border-b border-line bg-chrome px-2 whitespace-nowrap">
                 <Select
                     size="xs"
                     aria-label="Connection"
@@ -108,45 +177,68 @@ export function QueryTab({ id }: { id: string }) {
                     value={tab.profileId}
                     data={profiles.map((p) => ({ value: p.id, label: p.name }))}
                     onChange={(value) => manager.setConnection(id, value)}
-                    className="w-48"
+                    className="w-44 flex-none"
                 />
-                {tab.running ? (
+                {databases.length > 0 && (
+                    <Select
+                        size="xs"
+                        aria-label="Database"
+                        placeholder="Database"
+                        clearable
+                        value={tab.database}
+                        data={databases.map((name) => ({ value: name, label: name }))}
+                        onChange={(value) => manager.setContext(id, { database: value })}
+                        className="w-36 flex-none"
+                    />
+                )}
+                {layout.schemas && schemas.length > 0 && (
+                    <Select
+                        size="xs"
+                        aria-label="Schema"
+                        placeholder="Schema"
+                        clearable
+                        value={tab.schema}
+                        data={schemas.map((name) => ({ value: name, label: name }))}
+                        onChange={(value) => manager.setContext(id, { schema: value })}
+                        className="w-32 flex-none"
+                    />
+                )}
+                {/* Run, Run all and Stop are always mounted, in fixed places: starting a query only
+                    toggles which of them is enabled, so the toolbar never changes width or wraps,
+                    and nothing beside or below it moves. */}
+                <Tooltip
+                    label={`Run the ${layout.statementNoun} at the cursor, or the selection (Ctrl+Enter)`}
+                >
                     <Button
                         size="xs"
-                        color="red"
-                        variant="light"
-                        leftSection={<IconPlayerStop size={14} />}
-                        onClick={() => void manager.cancel(id)}
+                        leftSection={<IconPlayerPlay size={14} />}
+                        disabled={!profile || tab.running}
+                        onClick={() => run('current')}
                     >
-                        Stop
+                        Run
                     </Button>
-                ) : (
-                    <>
-                        <Tooltip
-                            label={`Run the ${layout.statementNoun} at the cursor, or the selection (Ctrl+Enter)`}
-                        >
-                            <Button
-                                size="xs"
-                                leftSection={<IconPlayerPlay size={14} />}
-                                disabled={!profile}
-                                onClick={() => run('current')}
-                            >
-                                Run
-                            </Button>
-                        </Tooltip>
-                        <Tooltip label={`Run every ${layout.statementNoun} (Ctrl+Shift+Enter)`}>
-                            <Button
-                                size="xs"
-                                variant="light"
-                                leftSection={<IconPlayerTrackNext size={14} />}
-                                disabled={!profile}
-                                onClick={() => run('all')}
-                            >
-                                Run all
-                            </Button>
-                        </Tooltip>
-                    </>
-                )}
+                </Tooltip>
+                <Tooltip label={`Run every ${layout.statementNoun} (Ctrl+Shift+Enter)`}>
+                    <Button
+                        size="xs"
+                        variant="light"
+                        leftSection={<IconPlayerTrackNext size={14} />}
+                        disabled={!profile || tab.running}
+                        onClick={() => run('all')}
+                    >
+                        Run all
+                    </Button>
+                </Tooltip>
+                <Button
+                    size="xs"
+                    color="red"
+                    variant="light"
+                    leftSection={<IconPlayerStop size={14} />}
+                    disabled={!tab.running}
+                    onClick={() => void manager.cancel(id)}
+                >
+                    Stop
+                </Button>
                 {canExplain && (
                     <Button
                         size="xs"
@@ -166,6 +258,65 @@ export function QueryTab({ id }: { id: string }) {
                         Explain
                     </Button>
                 )}
+                <Tooltip label="Save to a file (Ctrl+S)">
+                    <Button
+                        size="xs"
+                        variant="subtle"
+                        leftSection={<IconDeviceFloppy size={14} />}
+                        disabled={!isQueryDirty(tab) && !!tab.source}
+                        onClick={() => void actions.saveTab(id)}
+                    >
+                        Save
+                    </Button>
+                </Tooltip>
+                <Tooltip label="Export the result of this statement to a file">
+                    <Button
+                        size="xs"
+                        variant="subtle"
+                        leftSection={<IconDownload size={14} />}
+                        disabled={!profile || tab.running || !capabilities.length}
+                        onClick={() => {
+                            const model = instance.current?.getModel();
+                            const selection = instance.current?.getSelection();
+                            const text =
+                                model && selection && !selection.isEmpty()
+                                    ? model.getValueInRange(selection)
+                                    : tab.text;
+                            if (profile)
+                                openAdminDialog({
+                                    kind: 'export',
+                                    profileId: profile.id,
+                                    source: { kind: 'query', text, label: tab.title },
+                                });
+                        }}
+                    >
+                        Export
+                    </Button>
+                </Tooltip>
+                <Tooltip label="Export the result of this statement to a file">
+                    <Button
+                        size="xs"
+                        variant="subtle"
+                        leftSection={<IconDownload size={14} />}
+                        disabled={!profile || tab.running}
+                        onClick={() => {
+                            const model = instance.current?.getModel();
+                            const selection = instance.current?.getSelection();
+                            const text =
+                                model && selection && !selection.isEmpty()
+                                    ? model.getValueInRange(selection)
+                                    : tab.text;
+                            if (profile)
+                                openAdminDialog({
+                                    kind: 'export',
+                                    profileId: profile.id,
+                                    source: { kind: 'query', text, label: tab.title },
+                                });
+                        }}
+                    >
+                        Export
+                    </Button>
+                </Tooltip>
                 <span className="mx-1 h-4 w-px bg-line" />
                 {canTransact && tab.inTransaction ? (
                     <>
@@ -201,12 +352,12 @@ export function QueryTab({ id }: { id: string }) {
                         </Button>
                     </Tooltip>
                 ) : null}
-                <span className="ml-auto text-xs text-dimmed">
+                <span className="ml-auto flex-none text-xs text-dimmed">
                     {profile && !connected ? 'Not connected · connects when you run' : ''}
                 </span>
             </div>
 
-            <div className="min-h-24 flex-[2] border-b border-line">
+            <div className="min-h-24 min-w-0 flex-[2] overflow-hidden border-b border-line">
                 <CodeEditor
                     value={tab.text}
                     onChange={(text) => manager.setText(id, text)}
@@ -215,6 +366,7 @@ export function QueryTab({ id }: { id: string }) {
                         layout.language === 'plaintext' ? 'Command editor' : 'Statement editor'
                     }
                     purpose={{ kind: 'output' }}
+                    largeFile={handlingFor(tab.text.length) !== 'editor'}
                     className="h-full"
                     onEditor={(next) => {
                         instance.current = next;
@@ -222,10 +374,10 @@ export function QueryTab({ id }: { id: string }) {
                 />
             </div>
 
-            <div className="flex min-h-24 flex-[3] flex-col">
+            <div className="flex min-h-24 min-w-0 flex-[3] flex-col overflow-hidden">
                 <div
                     role="tablist"
-                    className="flex flex-none items-center border-b border-line bg-chrome"
+                    className="box-border flex h-8 flex-none items-center border-b border-line bg-chrome"
                 >
                     {BOTTOM_TABS.map((item) => (
                         <UnstyledButton
@@ -255,7 +407,16 @@ export function QueryTab({ id }: { id: string }) {
                         </span>
                     )}
                 </div>
-                <div className="min-h-0 flex-1 overflow-auto">
+                <div
+                    className={cx(
+                        'min-h-0 flex-1',
+                        // The grid scrolls itself; a second scrollbar here would appear and
+                        // disappear with the result and shift the grid.
+                        tab.bottom === 'results'
+                            ? 'overflow-hidden'
+                            : 'overflow-auto [scrollbar-gutter:stable]',
+                    )}
+                >
                     <BottomPanel tab={tab} />
                 </div>
             </div>
