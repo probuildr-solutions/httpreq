@@ -86,6 +86,8 @@ A merge becomes a GitHub Release, tagged `v<version>` with every installer attac
 npm run version:set -- 0.2.0
 ```
 
+To increment the current version instead, run `npm run version:patch`, `npm run version:minor` or `npm run version:major`. Each bumps every workspace and then runs `release:check`.
+
 A version with a hyphen (`0.2.0-beta.1`) is published as a pre-release, which the desktop app's update check ignores. The release is only created once every platform has built. If any platform fails, or the tag already exists, nothing is published. `npm run release:check` runs the same version checks locally.
 
 Packages are unsigned (Windows) or signed ad hoc (macOS) unless these repository secrets are set: `WIN_CSC_LINK` and `WIN_CSC_KEY_PASSWORD` (a base64 `.pfx` Authenticode certificate); `MAC_CSC_LINK` and `MAC_CSC_KEY_PASSWORD` (a base64 Developer ID Application `.p12`); `MAC_INSTALLER_CSC_LINK` and `MAC_INSTALLER_CSC_KEY_PASSWORD` (a base64 Developer ID Installer `.p12`, for the `.pkg`); and `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID` for notarization.
