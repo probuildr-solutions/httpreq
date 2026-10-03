@@ -12,7 +12,19 @@ import { useStudioStore } from '../studioStore';
  * They share the tab strip with query and file tabs; what each one shows is its own component's
  * business, kept in `state` so switching tabs does not lose a filter, a draft design or a scroll.
  */
-export type AdminKind = 'table' | 'design' | 'er' | 'documents' | 'indexes' | 'triggers';
+export type AdminKind =
+    | 'table'
+    | 'design'
+    | 'er'
+    | 'documents'
+    | 'indexes'
+    | 'triggers'
+    /** Structured forms that create or edit one object: no SQL editor is the main interface. */
+    | 'trigger-editor'
+    | 'procedure-editor'
+    | 'function-editor'
+    | 'event-editor'
+    | 'collection-designer';
 
 export interface AdminTab {
     /** `a` followed by 16 hex characters. */

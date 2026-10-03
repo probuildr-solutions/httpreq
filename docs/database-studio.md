@@ -42,6 +42,28 @@ Differences from the plan above, found while building it:
 - The three new engines register in `apps/desktop/src/dbHost.ts`. Statement splitting for them lives in the host (`sql.split` with the dialects `redis` and `mongodb`); scripts from files are SQL-only.
 - The "3 GB on a small machine" check is a unit test against a synthetic file source (`PatternSource`), plus the benchmark on real files, so it runs without a 3 GB file in the repository.
 
+## Workspace UI: results, tabs and object editors
+
+How the database workspace is put together, and what each part does and does not do.
+
+**Results of "Run all".** A query tab keeps a `StatementRun` per statement (`db/resultSession.ts`): its host query id, snapshot, view state (scroll and selection) and, when it was cut short, a `truncated` flag. Every statement gets its own result tab, in order, named `Result N` when it returns rows and `Statement N` when it changes data. Nothing is closed while the script runs. Each tab's grid reads its own host query, so switching tabs runs nothing again. Closing a result (one, left, right, others, all) releases only the host queries of the results it closes. The numbering never shifts. Re-running, or closing the query tab, releases all of them.
+
+- Execution is separate from presentation. `db/statementExecution.ts` (`executeStatements`) runs the statements through `DbApi` and reports `executionStarted`, `statementStarted`, `resultMetadataAvailable`, `resultRowsAvailable`, `statementTruncated`, `statementCompleted`, `statementFailed`, `executionCancelled` and `executionCompleted`. `db/executionEvents.ts` applies those events to the query tab (runs, message log, history); the host's own `query.state` pushes go through the same function. The query tab never drives the host.
+- The renderer holds counts and metadata, never rows. Rows stay in the host's spool on disk and the grid reads one page at a time (at most 12 pages per grid), so several large `SELECT`s cost a few pages each.
+- The connection runs one statement at a time, and the host stops a result that is only waiting for the grid to scroll when the next statement starts (its rows so far stay readable). So before the next statement starts, an earlier row-returning result is read on to `runAllRowLimit` rows (50,000, `useQuerySettings` in `queryStore.ts`). A result longer than that is marked "First N rows", and the pane says so. Running that statement alone pages through all of it. The limit has no settings screen yet.
+- Stop cancels the statement that is running and leaves the finished results as they are.
+- A grid remembers its scroll position and selected cell per result. The grid has no sorting or filtering of its own yet, so there is no such state to keep.
+
+**Toolbar.** `db/toolbarActions.ts` builds the list of actions from the tab's state, and `QueryToolbar.tsx` renders only that list. An action appears once; the duplicate Export was a copied block of markup, and a test now fails if an id repeats. The connection, database and schema pickers use the `toolbar` size of the shared `Select` (24 px, the height of the My Workspace picker) and truncate inside a fixed width.
+
+**Tabs.** `kit/TabBar.tsx` is the shared strip: the tabs scroll in the middle, the chevrons (disabled at the ends), the searchable all-tabs list and the trailing buttons stay fixed beside them. The database tab strip and the result tabs use it, and both use `tabs/CloseTabsMenu.tsx` for the close commands. The HTTP request tabs (`RequestTabs.tsx`) have their own older implementation with the same controls and were not moved onto it.
+
+**Object editors.** Triggers, stored procedures, functions, events and MongoDB collections open in forms (`admin/forms/`), not SQL tabs. The Monaco editor is used only for a body. The forms ask `dialectProfileOf(engine)` (`db-admin/src/dialectProfile.ts`) what to offer (timings, events, parameter modes, languages, event support, BSON types, collection options), so no form compares an engine's name. `typeCatalog.ts` holds the MySQL and PostgreSQL data types and what each takes (length, precision and scale, fractional digits, values, unsigned, identity); the table designer's type picker and its length, precision and scale inputs read it. `EditableGrid` is the generic editable table the column designer, procedure parameters and collection fields share. Saving shows the generated statements in the existing confirmation dialog, which runs them one at a time.
+
+- Editing an existing routine, trigger or event reads its definition back into the form (`db-admin/src/definitions.ts`). If the definition cannot be read, the SQL opens in a query tab as before. MySQL cannot replace a routine, trigger or event, so saving drops and creates it again; the dialog says so.
+- The collection designer creates collections. For an existing collection it replaces the validation rules only; the server's current validator is not read back into the form.
+- None of the generated trigger, routine, event or collection statements has been run against a real MySQL, PostgreSQL or MongoDB server in this change; they are unit tested for their output.
+
 ## 1. Principles
 
 1. **Additive and removable.** Delete the `db-*` packages and the add-on's bridge and the rest of the app builds and runs unchanged. The shared UI never imports add-on code unconditionally; it is code-split and loaded only when the user opens it.

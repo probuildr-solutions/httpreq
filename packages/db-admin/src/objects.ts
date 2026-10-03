@@ -72,6 +72,8 @@ export interface RoutineParameter {
     name: string;
     mode: 'IN' | 'OUT' | 'INOUT';
     type: string;
+    /** PostgreSQL: a default value expression (only the trailing parameters may have one). */
+    default?: string;
 }
 
 export interface RoutineDesign extends ObjectName {
@@ -83,6 +85,12 @@ export interface RoutineDesign extends ObjectName {
     /** The body, without the surrounding `BEGIN … END` or `$$`. */
     body: string;
     deterministic?: boolean;
+    /** `SQL SECURITY` (MySQL) / `SECURITY` (PostgreSQL): whose privileges the routine runs with. */
+    security?: 'DEFINER' | 'INVOKER';
+    /** MySQL: the routine's `COMMENT`. */
+    comment?: string;
+    /** PostgreSQL: the role that owns the routine. */
+    owner?: string;
 }
 
 const parameterList = (dialect: SqlDialect, routine: RoutineDesign) =>
@@ -91,9 +99,10 @@ const parameterList = (dialect: SqlDialect, routine: RoutineDesign) =>
             const name = dialect.quote(p.name);
             // A MySQL function takes only IN parameters, and does not write the mode.
             if (dialect.id === 'mysql' && routine.kind === 'function') return `${name} ${p.type}`;
-            return dialect.id === 'mysql'
-                ? `${p.mode} ${name} ${p.type}`
-                : `${p.mode} ${name} ${p.type}`;
+            const base = `${p.mode} ${name} ${p.type}`;
+            return dialect.id === 'postgresql' && p.default?.trim()
+                ? `${base} DEFAULT ${p.default.trim()}`
+                : base;
         })
         .join(', ');
 
@@ -130,6 +139,10 @@ export const createRoutineSql = (
                 ? routine.deterministic
                     ? '\nDETERMINISTIC'
                     : '\nNOT DETERMINISTIC'
+                : '') +
+            (routine.security ? `\nSQL SECURITY ${routine.security}` : '') +
+            (routine.comment?.trim()
+                ? `\nCOMMENT ${dialect.literal({ kind: 'text', value: routine.comment.trim() })}`
                 : '');
         const body = routine.body.trim();
         const create = /^begin\b/i.test(body) ? `${head}\n${body}` : `${head}\nBEGIN\n${body}\nEND`;
@@ -141,8 +154,18 @@ export const createRoutineSql = (
     const language = routine.language ?? 'plpgsql';
     const tag = dollarTag(routine.body);
     const returns = routine.kind === 'function' ? `\nRETURNS ${routine.returns ?? 'void'}` : '';
+    const security = routine.security ? `\nSECURITY ${routine.security}` : '';
+    const owner = routine.owner?.trim()
+        ? [
+              `ALTER ${word} ${target}(${routine.parameters
+                  .filter((p) => p.mode !== 'OUT')
+                  .map((p) => p.type)
+                  .join(', ')}) OWNER TO ${dialect.quote(routine.owner.trim())};`,
+          ]
+        : [];
     return [
-        `CREATE ${options.replace ? 'OR REPLACE ' : ''}${word} ${target}(${parameterList(dialect, routine)})${returns}\nLANGUAGE ${language}\nAS ${tag}\n${routine.body.trim()}\n${tag};`,
+        `CREATE ${options.replace ? 'OR REPLACE ' : ''}${word} ${target}(${parameterList(dialect, routine)})${returns}\nLANGUAGE ${language}${security}\nAS ${tag}\n${routine.body.trim()}\n${tag};`,
+        ...owner,
     ];
 };
 
@@ -281,7 +304,7 @@ export const parametersFromDefinition = (
 /* ---------- Triggers ---------- */
 
 export type TriggerTiming = 'BEFORE' | 'AFTER' | 'INSTEAD OF';
-export type TriggerEvent = 'INSERT' | 'UPDATE' | 'DELETE';
+export type TriggerEvent = 'INSERT' | 'UPDATE' | 'DELETE' | 'TRUNCATE';
 
 export interface TriggerDesign extends ObjectName {
     table: string;
@@ -292,6 +315,10 @@ export interface TriggerDesign extends ObjectName {
     /** PostgreSQL: a `WHEN` condition. */
     when?: string;
     forEachRow?: boolean;
+    /** MySQL: run before or after another trigger on the same table and event. */
+    order?: { position: 'FOLLOWS' | 'PRECEDES'; trigger: string };
+    /** PostgreSQL: `UPDATE OF col, …` limits an UPDATE trigger to those columns. */
+    updateOf?: string[];
 }
 
 /** What the triggers of each engine allow, for the form. */
@@ -299,10 +326,48 @@ export const triggerOptions = (dialect: SqlDialect) => ({
     timings: (dialect.id === 'mysql'
         ? ['BEFORE', 'AFTER']
         : ['BEFORE', 'AFTER', 'INSTEAD OF']) as TriggerTiming[],
+    events: (dialect.id === 'mysql'
+        ? ['INSERT', 'UPDATE', 'DELETE']
+        : ['INSERT', 'UPDATE', 'DELETE', 'TRUNCATE']) as TriggerEvent[],
     // MySQL allows exactly one event per trigger; PostgreSQL several.
     multipleEvents: dialect.id === 'postgresql',
     canEnable: dialect.id === 'postgresql',
+    /** A `WHEN (…)` condition. */
+    condition: dialect.id === 'postgresql',
+    /** `FOR EACH STATEMENT`; MySQL triggers are always row-level. */
+    statementLevel: dialect.id === 'postgresql',
+    /** `FOLLOWS` / `PRECEDES` another trigger. */
+    ordering: dialect.id === 'mysql',
 });
+
+/** Why a trigger design cannot be created, in the engine's own rules; empty when it can. */
+export const validateTrigger = (dialect: SqlDialect, trigger: TriggerDesign): string[] => {
+    const problems: string[] = [];
+    const options = triggerOptions(dialect);
+    if (!trigger.name.trim()) problems.push('The trigger needs a name.');
+    if (!trigger.table.trim()) problems.push('Choose the table the trigger belongs to.');
+    if (trigger.events.length === 0) problems.push('Choose at least one event.');
+    if (!options.timings.includes(trigger.timing))
+        problems.push(`${trigger.timing} triggers are not available on this engine.`);
+    if (trigger.events.length > 1 && !options.multipleEvents)
+        problems.push('This engine allows one event per trigger.');
+    for (const event of trigger.events)
+        if (!options.events.includes(event))
+            problems.push(`${event} triggers are not available on this engine.`);
+    if (!trigger.body.trim()) problems.push('The trigger needs a body.');
+    if (dialect.id === 'postgresql') {
+        const statement = trigger.forEachRow === false;
+        if (trigger.events.includes('TRUNCATE') && !statement)
+            problems.push('A TRUNCATE trigger runs once per statement.');
+        if (trigger.timing === 'INSTEAD OF' && statement)
+            problems.push('An INSTEAD OF trigger runs once per row.');
+        if (trigger.when?.trim() && trigger.events.includes('TRUNCATE'))
+            problems.push('A TRUNCATE trigger cannot have a condition.');
+    }
+    if (trigger.order && !trigger.order.trigger.trim())
+        problems.push('Choose the trigger to order this one against.');
+    return problems;
+};
 
 export const createTriggerTemplate = (dialect: SqlDialect, table: ObjectName): string =>
     dialect.id === 'mysql'
@@ -315,15 +380,26 @@ export const createTriggerSql = (dialect: SqlDialect, trigger: TriggerDesign): s
         const event = trigger.events[0] ?? 'INSERT';
         const body = trigger.body.trim();
         const wrapped = /^begin\b/i.test(body) ? body : `BEGIN\n${body}\nEND`;
+        const order = trigger.order
+            ? `\n${trigger.order.position} ${dialect.quote(trigger.order.trigger)}`
+            : '';
         return [
-            `CREATE TRIGGER ${dialect.qualify(trigger)}\n${trigger.timing} ${event} ON ${tableName}\nFOR EACH ROW\n${wrapped.replace(/;+\s*$/, '')};`,
+            `CREATE TRIGGER ${dialect.qualify(trigger)}\n${trigger.timing} ${event} ON ${tableName}\nFOR EACH ROW${order}\n${wrapped.replace(/;+\s*$/, '')};`,
         ];
     }
     const fn = dialect.qualify({ schema: trigger.schema, name: `${trigger.name}_fn` });
     const tag = dollarTag(trigger.body);
     return [
         `CREATE OR REPLACE FUNCTION ${fn}()\nRETURNS trigger\nLANGUAGE plpgsql\nAS ${tag}\n${trigger.body.trim()}\n${tag};`,
-        `CREATE TRIGGER ${dialect.quote(trigger.name)}\n${trigger.timing} ${trigger.events.join(' OR ')} ON ${tableName}\nFOR EACH ${trigger.forEachRow === false ? 'STATEMENT' : 'ROW'}${
+        `CREATE TRIGGER ${dialect.quote(trigger.name)}\n${trigger.timing} ${trigger.events
+            .map((event) =>
+                event === 'UPDATE' && trigger.updateOf?.length
+                    ? `UPDATE OF ${trigger.updateOf.map((column) => dialect.quote(column)).join(', ')}`
+                    : event,
+            )
+            .join(
+                ' OR ',
+            )} ON ${tableName}\nFOR EACH ${trigger.forEachRow === false ? 'STATEMENT' : 'ROW'}${
             trigger.when ? `\nWHEN (${trigger.when})` : ''
         }\nEXECUTE FUNCTION ${fn}();`,
     ];
@@ -373,3 +449,44 @@ export const restartSequenceSql = (
     value: string,
 ): string =>
     `ALTER SEQUENCE ${dialect.qualify(sequence)} RESTART WITH ${/^-?\d+$/.test(value.trim()) ? value.trim() : '1'};`;
+
+/* ---------- Routine validation ---------- */
+
+/** What the routine form offers for each engine. */
+export const routineOptions = (dialect: SqlDialect, kind: 'function' | 'procedure') => ({
+    modes: (dialect.id === 'mysql' && kind === 'function'
+        ? ['IN']
+        : ['IN', 'OUT', 'INOUT']) as RoutineParameter['mode'][],
+    languages: dialect.id === 'postgresql' ? ['plpgsql', 'sql'] : [],
+    parameterDefaults: dialect.id === 'postgresql',
+    deterministic: dialect.id === 'mysql' && kind === 'function',
+    security: true,
+    comment: dialect.id === 'mysql',
+    owner: dialect.id === 'postgresql',
+});
+
+const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_$]*$/;
+
+/** Why a routine cannot be created; empty when it can. */
+export const validateRoutine = (dialect: SqlDialect, routine: RoutineDesign): string[] => {
+    const problems: string[] = [];
+    const options = routineOptions(dialect, routine.kind);
+    if (!routine.name.trim()) problems.push(`The ${routine.kind} needs a name.`);
+    const seen = new Set<string>();
+    routine.parameters.forEach((p, index) => {
+        const label = `Parameter ${index + 1}`;
+        if (!p.name.trim()) problems.push(`${label} needs a name.`);
+        else if (!IDENTIFIER.test(p.name.trim()))
+            problems.push(`${label}: "${p.name}" is not a plain identifier.`);
+        else if (seen.has(p.name.toLowerCase()))
+            problems.push(`${label}: "${p.name}" is used twice.`);
+        seen.add(p.name.toLowerCase());
+        if (!p.type.trim()) problems.push(`${label} needs a data type.`);
+        if (!options.modes.includes(p.mode))
+            problems.push(`${label}: ${p.mode} is not available for a ${routine.kind}.`);
+    });
+    if (routine.kind === 'function' && !routine.returns?.trim())
+        problems.push('A function needs a return type.');
+    if (!routine.body.trim()) problems.push(`The ${routine.kind} needs a body.`);
+    return problems;
+};

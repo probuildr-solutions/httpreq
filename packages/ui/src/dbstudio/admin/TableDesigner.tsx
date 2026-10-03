@@ -11,7 +11,9 @@ import {
     designFromMetadata,
     dialectOf,
     emptyDesign,
+    findType,
     newColumnId,
+    relationalProfileOf,
     validateDesign,
     type ColumnDesign,
     type ForeignKeyDesign,
@@ -24,7 +26,6 @@ import { confirmAction } from '../../confirm';
 import {
     ActionIcon,
     Alert,
-    Autocomplete,
     Button,
     Checkbox,
     Menu,
@@ -32,11 +33,12 @@ import {
     Tabs,
     Text,
     TextInput,
-    Tooltip,
     cx,
     notifications,
 } from '../../kit';
+import { EditableGrid, type GridColumn } from '../../editor/EditableGrid';
 import { useProfiles } from '../db/profiles';
+import { TypeSelect } from './forms/TypeSelect';
 import { useDbManager } from '../db/useDbManager';
 import { patchAdmin, useAdmin } from './adminStore';
 
@@ -118,6 +120,7 @@ export function TableDesigner({ id }: { id: string }) {
     const profile = useProfiles((state) => state.profiles.find((p) => p.id === tab?.profileId));
     const engine = profile?.settings.engine ?? 'mysql';
     const dialect = useMemo(() => dialectOf(engine), [engine]);
+    const features = useMemo(() => relationalProfileOf(engine).table, [engine]);
     const creating = !tab?.name;
 
     const saved = tab?.state.designer as DesignerState | undefined;
@@ -341,6 +344,298 @@ export function TableDesigner({ id }: { id: string }) {
             return d;
         });
 
+    const newColumn = (): ColumnDesign => ({
+        id: newColumnId(),
+        name: '',
+        type: dialect.id === 'mysql' ? 'varchar' : 'text',
+        length: dialect.id === 'mysql' ? '255' : undefined,
+        nullable: true,
+    });
+
+    /** Length, precision and scale are one `length` string: `255`, `10`, `10,2`. */
+    const parts = (column: ColumnDesign) => {
+        const [precision = '', scale = ''] = (column.length ?? '').split(',');
+        return { precision, scale };
+    };
+    const isUnique = (name: string) =>
+        !!name && design.uniques.some((u) => u.columns.length === 1 && u.columns[0] === name);
+
+    const columnGrid: GridColumn<ColumnDesign>[] = [
+        {
+            id: 'name',
+            header: 'Column',
+            width: 'minmax(130px, 1.2fr)',
+            cell: (column, { index }) => (
+                <TextInput
+                    size="xs"
+                    variant="unstyled"
+                    aria-label={`Column ${index + 1} name`}
+                    placeholder="column_name"
+                    value={column.name}
+                    onChange={(e) => updateColumn(index, { name: e.target.value })}
+                />
+            ),
+        },
+        {
+            id: 'type',
+            header: 'Data type',
+            width: 'minmax(150px, 1.2fr)',
+            cell: (column, { index }) => (
+                <TypeSelect
+                    inCell
+                    catalog={dialect.typeCatalog}
+                    ariaLabel={`Column ${index + 1} type`}
+                    value={column.type}
+                    onChange={(type) => {
+                        const info = findType(dialect.typeCatalog, type);
+                        const before = findType(dialect.typeCatalog, column.type);
+                        // A length belongs to the kind of type that had it: `255` means nothing to a
+                        // decimal and `10,2` nothing to a timestamp, so changing kind forgets it.
+                        const kindChanged = !!info && info.params !== before?.params;
+                        updateColumn(index, {
+                            type,
+                            ...(kindChanged || (info && info.params === 'none')
+                                ? { length: undefined }
+                                : {}),
+                            ...(info && !info.unsigned ? { unsigned: false } : {}),
+                        });
+                    }}
+                />
+            ),
+        },
+        {
+            id: 'length',
+            header: 'Length',
+            width: '76px',
+            cell: (column, { index }) => {
+                const params = findType(dialect.typeCatalog, column.type)?.params;
+                const takes = params === 'length' || params === 'values';
+                return (
+                    <TextInput
+                        size="xs"
+                        variant="unstyled"
+                        aria-label={`Column ${index + 1} length`}
+                        placeholder={params === 'values' ? "'a','b'" : takes ? '255' : ''}
+                        disabled={!takes}
+                        value={takes ? (column.length ?? '') : ''}
+                        onChange={(e) => updateColumn(index, { length: e.target.value })}
+                    />
+                );
+            },
+        },
+        {
+            id: 'precision',
+            header: 'Precision',
+            width: '72px',
+            cell: (column, { index }) => {
+                const params = findType(dialect.typeCatalog, column.type)?.params;
+                const takes = params === 'precisionScale' || params === 'fractional';
+                const { precision, scale } = parts(column);
+                return (
+                    <TextInput
+                        size="xs"
+                        variant="unstyled"
+                        aria-label={`Column ${index + 1} precision`}
+                        placeholder={params === 'fractional' ? '0–6' : takes ? '10' : ''}
+                        disabled={!takes}
+                        value={takes ? precision : ''}
+                        onChange={(e) =>
+                            updateColumn(index, {
+                                length:
+                                    scale && e.target.value
+                                        ? `${e.target.value},${scale}`
+                                        : e.target.value || undefined,
+                            })
+                        }
+                    />
+                );
+            },
+        },
+        {
+            id: 'scale',
+            header: 'Scale',
+            width: '60px',
+            cell: (column, { index }) => {
+                const params = findType(dialect.typeCatalog, column.type)?.params;
+                const takes = params === 'precisionScale';
+                const { precision, scale } = parts(column);
+                return (
+                    <TextInput
+                        size="xs"
+                        variant="unstyled"
+                        aria-label={`Column ${index + 1} scale`}
+                        placeholder={takes ? '2' : ''}
+                        disabled={!takes || !precision}
+                        value={takes ? scale : ''}
+                        onChange={(e) =>
+                            updateColumn(index, {
+                                length: e.target.value
+                                    ? `${precision},${e.target.value}`
+                                    : precision,
+                            })
+                        }
+                    />
+                );
+            },
+        },
+        {
+            id: 'unsigned',
+            header: 'Unsigned',
+            width: '68px',
+            center: true,
+            hidden: !features.unsigned,
+            cell: (column, { index }) => (
+                <Checkbox
+                    size="xs"
+                    aria-label={`Column ${index + 1} unsigned`}
+                    checked={!!column.unsigned}
+                    disabled={!findType(dialect.typeCatalog, column.type)?.unsigned}
+                    onChange={(e) => updateColumn(index, { unsigned: e.currentTarget.checked })}
+                />
+            ),
+        },
+        {
+            id: 'null',
+            header: 'Null',
+            width: '48px',
+            center: true,
+            cell: (column, { index }) => (
+                <Checkbox
+                    size="xs"
+                    aria-label={`Column ${index + 1} nullable`}
+                    checked={column.nullable}
+                    disabled={design.primaryKey.includes(column.name)}
+                    onChange={(e) => updateColumn(index, { nullable: e.currentTarget.checked })}
+                />
+            ),
+        },
+        {
+            id: 'pk',
+            header: 'PK',
+            width: '44px',
+            center: true,
+            cell: (column, { index }) => (
+                <Checkbox
+                    size="xs"
+                    aria-label={`Column ${index + 1} primary key`}
+                    checked={design.primaryKey.includes(column.name)}
+                    onChange={(e) =>
+                        edit((d) => {
+                            d.primaryKey = e.currentTarget.checked
+                                ? [...d.primaryKey, column.name]
+                                : d.primaryKey.filter((n) => n !== column.name);
+                            if (e.currentTarget.checked) d.columns[index]!.nullable = false;
+                            return d;
+                        })
+                    }
+                />
+            ),
+        },
+        {
+            id: 'unique',
+            header: 'Unique',
+            width: '58px',
+            center: true,
+            cell: (column, { index }) => (
+                <Checkbox
+                    size="xs"
+                    aria-label={`Column ${index + 1} unique`}
+                    checked={isUnique(column.name)}
+                    disabled={!column.name}
+                    onChange={(e) =>
+                        edit((d) => {
+                            d.uniques = e.currentTarget.checked
+                                ? [...d.uniques, { columns: [column.name] }]
+                                : d.uniques.filter(
+                                      (u) =>
+                                          !(u.columns.length === 1 && u.columns[0] === column.name),
+                                  );
+                            return d;
+                        })
+                    }
+                />
+            ),
+        },
+        {
+            id: 'auto',
+            header: features.identity === 'auto_increment' ? 'Auto inc.' : 'Identity',
+            width: '70px',
+            center: true,
+            cell: (column, { index }) => {
+                const info = findType(dialect.typeCatalog, column.type);
+                // A serial type already numbers itself; an identity column is the newer way.
+                const serial = /serial/i.test(column.type);
+                return (
+                    <Checkbox
+                        size="xs"
+                        aria-label={`Column ${index + 1} auto increment`}
+                        checked={!!column.autoIncrement || serial}
+                        disabled={!!column.generated || serial || (!!info && !info.counter)}
+                        onChange={(e) =>
+                            updateColumn(index, { autoIncrement: e.currentTarget.checked })
+                        }
+                    />
+                );
+            },
+        },
+        {
+            id: 'default',
+            header: 'Default',
+            width: 'minmax(90px, 0.9fr)',
+            cell: (column, { index }) => (
+                <TextInput
+                    size="xs"
+                    variant="unstyled"
+                    aria-label={`Column ${index + 1} default`}
+                    placeholder="expression"
+                    disabled={!!column.autoIncrement || !!column.generated}
+                    value={column.default ?? ''}
+                    onChange={(e) => updateColumn(index, { default: e.target.value })}
+                />
+            ),
+        },
+        {
+            id: 'generated',
+            header: 'Generated as',
+            width: 'minmax(90px, 0.9fr)',
+            hidden: !features.generatedColumns,
+            cell: (column, { index }) => (
+                <TextInput
+                    size="xs"
+                    variant="unstyled"
+                    aria-label={`Column ${index + 1} generated expression`}
+                    placeholder="expression"
+                    value={column.generated?.expression ?? ''}
+                    onChange={(e) =>
+                        updateColumn(index, {
+                            generated: e.target.value
+                                ? {
+                                      expression: e.target.value,
+                                      stored: column.generated?.stored ?? true,
+                                  }
+                                : undefined,
+                        })
+                    }
+                />
+            ),
+        },
+        {
+            id: 'comment',
+            header: 'Comment',
+            width: 'minmax(100px, 1fr)',
+            hidden: !features.columnComments,
+            cell: (column, { index }) => (
+                <TextInput
+                    size="xs"
+                    variant="unstyled"
+                    aria-label={`Column ${index + 1} comment`}
+                    value={column.comment ?? ''}
+                    onChange={(e) => updateColumn(index, { comment: e.target.value })}
+                />
+            ),
+        },
+    ];
+
     const methods =
         engine === 'postgresql'
             ? ['', 'btree', 'hash', 'gin', 'gist', 'brin']
@@ -390,11 +685,15 @@ export function TableDesigner({ id }: { id: string }) {
                 onChange={(v) => v && commit({ ...state, section: v })}
                 className="min-h-0 flex-1"
             >
-                <Tabs.List className="flex-none border-b border-line bg-chrome px-2">
+                <Tabs.List className="flex-none flex-nowrap overflow-x-auto border-b border-line bg-chrome px-2">
                     <Tabs.Tab value="columns">Columns ({design.columns.length})</Tabs.Tab>
-                    <Tabs.Tab value="keys">Keys and constraints</Tabs.Tab>
+                    <Tabs.Tab value="primary">Primary Key</Tabs.Tab>
                     <Tabs.Tab value="indexes">Indexes ({design.indexes.length})</Tabs.Tab>
-                    <Tabs.Tab value="sql">SQL preview</Tabs.Tab>
+                    <Tabs.Tab value="foreign">Foreign Keys ({design.foreignKeys.length})</Tabs.Tab>
+                    <Tabs.Tab value="unique">Unique Constraints ({design.uniques.length})</Tabs.Tab>
+                    <Tabs.Tab value="checks">Checks ({design.checks.length})</Tabs.Tab>
+                    <Tabs.Tab value="options">Table Options</Tabs.Tab>
+                    <Tabs.Tab value="sql">SQL Preview</Tabs.Tab>
                 </Tabs.List>
 
                 <div className="min-h-0 flex-1 overflow-auto p-3">
@@ -414,229 +713,34 @@ export function TableDesigner({ id }: { id: string }) {
                     )}
 
                     {state.section === 'columns' && (
-                        <div>
-                            <table className="w-full border-collapse text-xs" aria-label="Columns">
-                                <thead>
-                                    <tr className="text-left text-dimmed">
-                                        <th className="px-1 py-1 font-medium">Name</th>
-                                        <th className="px-1 py-1 font-medium">Type</th>
-                                        <th className="px-1 py-1 font-medium">Length</th>
-                                        {dialect.id === 'mysql' && (
-                                            <th className="px-1 py-1 font-medium">Unsigned</th>
-                                        )}
-                                        <th className="px-1 py-1 font-medium">Null</th>
-                                        <th className="px-1 py-1 font-medium">Key</th>
-                                        <th className="px-1 py-1 font-medium">
-                                            {dialect.id === 'mysql' ? 'Auto inc.' : 'Identity'}
-                                        </th>
-                                        <th className="px-1 py-1 font-medium">Default</th>
-                                        <th className="px-1 py-1 font-medium">Generated as</th>
-                                        <th className="px-1 py-1 font-medium">Comment</th>
-                                        <th />
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {design.columns.map((column, index) => (
-                                        <tr key={column.id} className="align-top">
-                                            <td className="px-1 py-0.5">
-                                                <TextInput
-                                                    size="xs"
-                                                    aria-label={`Column ${index + 1} name`}
-                                                    value={column.name}
-                                                    onChange={(e) =>
-                                                        updateColumn(index, {
-                                                            name: e.target.value,
-                                                        })
-                                                    }
-                                                />
-                                            </td>
-                                            <td className="w-44 px-1 py-0.5">
-                                                <Autocomplete
-                                                    size="xs"
-                                                    aria-label={`Column ${index + 1} type`}
-                                                    data={[...dialect.dataTypes]}
-                                                    value={column.type}
-                                                    onChange={(value) =>
-                                                        updateColumn(index, { type: value })
-                                                    }
-                                                />
-                                            </td>
-                                            <td className="w-20 px-1 py-0.5">
-                                                <TextInput
-                                                    size="xs"
-                                                    aria-label={`Column ${index + 1} length`}
-                                                    disabled={
-                                                        !dialect.lengthTypes.has(
-                                                            column.type.toLowerCase(),
-                                                        )
-                                                    }
-                                                    value={column.length ?? ''}
-                                                    onChange={(e) =>
-                                                        updateColumn(index, {
-                                                            length: e.target.value,
-                                                        })
-                                                    }
-                                                />
-                                            </td>
-                                            {dialect.id === 'mysql' && (
-                                                <td className="px-1 py-0.5 text-center">
-                                                    <Checkbox
-                                                        aria-label={`Column ${index + 1} unsigned`}
-                                                        checked={!!column.unsigned}
-                                                        onChange={(e) =>
-                                                            updateColumn(index, {
-                                                                unsigned: e.currentTarget.checked,
-                                                            })
-                                                        }
-                                                    />
-                                                </td>
-                                            )}
-                                            <td className="px-1 py-0.5 text-center">
-                                                <Checkbox
-                                                    aria-label={`Column ${index + 1} nullable`}
-                                                    checked={column.nullable}
-                                                    disabled={design.primaryKey.includes(
-                                                        column.name,
-                                                    )}
-                                                    onChange={(e) =>
-                                                        updateColumn(index, {
-                                                            nullable: e.currentTarget.checked,
-                                                        })
-                                                    }
-                                                />
-                                            </td>
-                                            <td className="px-1 py-0.5 text-center">
-                                                <Checkbox
-                                                    aria-label={`Column ${index + 1} primary key`}
-                                                    checked={design.primaryKey.includes(
-                                                        column.name,
-                                                    )}
-                                                    onChange={(e) =>
-                                                        edit((d) => {
-                                                            d.primaryKey = e.currentTarget.checked
-                                                                ? [...d.primaryKey, column.name]
-                                                                : d.primaryKey.filter(
-                                                                      (n) => n !== column.name,
-                                                                  );
-                                                            if (e.currentTarget.checked)
-                                                                d.columns[index]!.nullable = false;
-                                                            return d;
-                                                        })
-                                                    }
-                                                />
-                                            </td>
-                                            <td className="px-1 py-0.5 text-center">
-                                                <Checkbox
-                                                    aria-label={`Column ${index + 1} auto increment`}
-                                                    checked={!!column.autoIncrement}
-                                                    disabled={!!column.generated}
-                                                    onChange={(e) =>
-                                                        updateColumn(index, {
-                                                            autoIncrement: e.currentTarget.checked,
-                                                        })
-                                                    }
-                                                />
-                                            </td>
-                                            <td className="px-1 py-0.5">
-                                                <TextInput
-                                                    size="xs"
-                                                    aria-label={`Column ${index + 1} default`}
-                                                    placeholder="expression"
-                                                    disabled={
-                                                        !!column.autoIncrement || !!column.generated
-                                                    }
-                                                    value={column.default ?? ''}
-                                                    onChange={(e) =>
-                                                        updateColumn(index, {
-                                                            default: e.target.value,
-                                                        })
-                                                    }
-                                                />
-                                            </td>
-                                            <td className="px-1 py-0.5">
-                                                <TextInput
-                                                    size="xs"
-                                                    aria-label={`Column ${index + 1} generated expression`}
-                                                    placeholder="expression"
-                                                    value={column.generated?.expression ?? ''}
-                                                    onChange={(e) =>
-                                                        updateColumn(index, {
-                                                            generated: e.target.value
-                                                                ? {
-                                                                      expression: e.target.value,
-                                                                      stored:
-                                                                          column.generated
-                                                                              ?.stored ?? true,
-                                                                  }
-                                                                : undefined,
-                                                        })
-                                                    }
-                                                />
-                                            </td>
-                                            <td className="px-1 py-0.5">
-                                                <TextInput
-                                                    size="xs"
-                                                    aria-label={`Column ${index + 1} comment`}
-                                                    value={column.comment ?? ''}
-                                                    onChange={(e) =>
-                                                        updateColumn(index, {
-                                                            comment: e.target.value,
-                                                        })
-                                                    }
-                                                />
-                                            </td>
-                                            <td className="px-1 py-0.5">
-                                                <Tooltip label="Remove this column">
-                                                    <ActionIcon
-                                                        size="sm"
-                                                        variant="subtle"
-                                                        color="red"
-                                                        aria-label={`Remove column ${column.name || index + 1}`}
-                                                        onClick={() =>
-                                                            edit((d) => {
-                                                                const [gone] = d.columns.splice(
-                                                                    index,
-                                                                    1,
-                                                                );
-                                                                d.primaryKey = d.primaryKey.filter(
-                                                                    (n) => n !== gone!.name,
-                                                                );
-                                                                return d;
-                                                            })
-                                                        }
-                                                    >
-                                                        <IconTrash size={14} />
-                                                    </ActionIcon>
-                                                </Tooltip>
-                                            </td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
-                            <Button
-                                size="xs"
-                                variant="light"
-                                className="mt-2"
-                                leftSection={<IconPlus size={14} />}
-                                onClick={() =>
-                                    edit((d) => {
-                                        d.columns.push({
-                                            id: newColumnId(),
-                                            name: '',
-                                            type: dialect.id === 'mysql' ? 'varchar' : 'text',
-                                            length: dialect.id === 'mysql' ? '255' : undefined,
-                                            nullable: true,
-                                        });
-                                        return d;
-                                    })
-                                }
-                            >
-                                Add column
-                            </Button>
-                        </div>
+                        <EditableGrid
+                            label="Columns"
+                            rows={design.columns}
+                            columns={columnGrid}
+                            onChange={(columns) =>
+                                edit((d) => {
+                                    // Keys never name a column that is gone.
+                                    const names = new Set(columns.map((c) => c.name));
+                                    d.columns = columns;
+                                    d.primaryKey = d.primaryKey.filter((n) => names.has(n));
+                                    return d;
+                                })
+                            }
+                            createRow={newColumn}
+                            addLabel="Add column"
+                            copyRow={(column) => ({
+                                ...structuredClone(column),
+                                id: newColumnId(),
+                                name: column.name ? `${column.name}_copy` : '',
+                                autoIncrement: false,
+                            })}
+                            reorderable
+                            rowLabel={(column, index) => `Column ${column.name || index + 1}`}
+                            emptyText="No columns yet."
+                        />
                     )}
 
-                    {state.section === 'keys' && (
+                    {state.section === 'primary' && (
                         <div className="flex flex-col gap-5">
                             <section>
                                 <h3 className="mt-0 mb-1 text-sm font-semibold">Primary key</h3>
@@ -647,7 +751,11 @@ export function TableDesigner({ id }: { id: string }) {
                                     onChange={(value) => edit((d) => ({ ...d, primaryKey: value }))}
                                 />
                             </section>
+                        </div>
+                    )}
 
+                    {state.section === 'foreign' && (
+                        <div className="flex flex-col gap-5">
                             <section>
                                 <h3 className="mt-0 mb-1 text-sm font-semibold">Foreign keys</h3>
                                 {design.foreignKeys.map((key, index) => (
@@ -806,7 +914,11 @@ export function TableDesigner({ id }: { id: string }) {
                                     Add foreign key
                                 </Button>
                             </section>
+                        </div>
+                    )}
 
+                    {state.section === 'unique' && (
+                        <div className="flex flex-col gap-5">
                             <section>
                                 <h3 className="mt-0 mb-1 text-sm font-semibold">
                                     Unique constraints
@@ -867,7 +979,11 @@ export function TableDesigner({ id }: { id: string }) {
                                     Add unique constraint
                                 </Button>
                             </section>
+                        </div>
+                    )}
 
+                    {state.section === 'checks' && (
+                        <div className="flex flex-col gap-5">
                             <section>
                                 <h3 className="mt-0 mb-1 text-sm font-semibold">
                                     Check constraints
@@ -1128,6 +1244,30 @@ export function TableDesigner({ id }: { id: string }) {
                             >
                                 Add index
                             </Button>
+                        </div>
+                    )}
+
+                    {state.section === 'options' && (
+                        <div className="flex max-w-xl flex-col gap-3">
+                            <TextInput
+                                size="sm"
+                                label="Comment"
+                                aria-label="Table comment"
+                                description={
+                                    features.tableComment
+                                        ? 'Shown in the explorer and stored with the table.'
+                                        : undefined
+                                }
+                                value={design.comment ?? ''}
+                                onChange={(e) =>
+                                    edit((d) => ({ ...d, comment: e.target.value || undefined }))
+                                }
+                            />
+                            <Text size="xs" className="text-dimmed">
+                                {engine === 'mysql'
+                                    ? 'The storage engine, character set and collation are the database defaults.'
+                                    : 'The table is created in the schema chosen in the explorer.'}
+                            </Text>
                         </div>
                     )}
 

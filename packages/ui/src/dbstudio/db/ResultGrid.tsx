@@ -8,6 +8,7 @@ import type { DbCell, DbResultInfo, DbResultPage } from '@httpreq/shared';
 import { Text, cx } from '../../kit';
 import { formatCell } from './cells';
 import type { DbApi } from './dbApi';
+import type { ResultViewState } from './resultSession';
 
 const ROW_HEIGHT = 24;
 const HEADER_HEIGHT = 28;
@@ -26,6 +27,10 @@ interface Props {
     result: DbResultInfo;
     /** Asks the host for rows up to this many; the host reads ahead of the window, not beyond. */
     onDemand: (rows: number) => void;
+    /** Where the grid was left last time this result was shown; it opens there. */
+    view?: ResultViewState;
+    /** Called as the grid goes away, with where it was left. */
+    onView?: (view: ResultViewState) => void;
 }
 
 /**
@@ -34,7 +39,7 @@ interface Props {
  * a few pages of memory here, and the host is asked to read from the server only as far as needed.
  * Cells the host cut short can be loaded whole with a double click.
  */
-export function ResultGrid({ api, runId, result, onDemand }: Props) {
+export function ResultGrid({ api, runId, result, onDemand, view, onView }: Props) {
     const scroller = useRef<HTMLDivElement>(null);
     const [scrollTop, setScrollTop] = useState(0);
     const [height, setHeight] = useState(300);
@@ -45,14 +50,29 @@ export function ResultGrid({ api, runId, result, onDemand }: Props) {
     const pending = useRef(new Set<number>());
     const key = `${runId}:${result.index}`;
 
-    // A different statement or result set starts from nothing.
+    // Where the grid is now, kept in refs so leaving can report it without re-rendering on scroll.
+    const live = useRef<ResultViewState>({ scrollTop: 0, selected: null });
+    live.current = { scrollTop, selected };
+    const saved = useRef(view);
+    saved.current = view;
+    const report = useRef(onView);
+    report.current = onView;
+
+    // A different statement or result set starts from nothing, or from where it was left. Only the
+    // rows near the window are fetched again; the host serves them from its own copy, so nothing
+    // runs a second time.
     useEffect(() => {
         setPages(new Map());
         setFull(new Map());
-        setSelected(null);
         pending.current.clear();
-        scroller.current?.scrollTo({ top: 0, left: 0 });
-        setScrollTop(0);
+        const top = saved.current?.scrollTop ?? 0;
+        setSelected(saved.current?.selected ?? null);
+        if (scroller.current) {
+            scroller.current.scrollTop = top;
+            scroller.current.scrollLeft = 0;
+        }
+        setScrollTop(top);
+        return () => report.current?.(live.current);
     }, [key]);
 
     useEffect(() => {

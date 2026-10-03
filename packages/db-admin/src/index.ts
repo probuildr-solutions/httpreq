@@ -5,11 +5,17 @@
 
 export * from './bsonDocument';
 export * from './capabilities';
+export * from './collectionDesign';
+export * from './definitions';
 export * from './dialect';
+export * from './dialectProfile';
 export * from './er';
+export * from './events';
 export * from './mongo';
 export * from './objects';
 export * from './rowEdit';
+export * from './sqlBody';
 export * from './tableDesign';
+export * from './typeCatalog';
 export * from './bsonFromDb';
 export * from './valueSql';

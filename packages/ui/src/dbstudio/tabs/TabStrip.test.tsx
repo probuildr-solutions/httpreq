@@ -24,10 +24,9 @@ const query = (id: string, title: string, text = '', saved = text): QueryTab => 
     text,
     savedText: saved,
     source: null,
-    runId: null,
-    snapshot: null,
+    runs: [],
+    activeRun: null,
     log: [],
-    resultIndex: 0,
     bottom: 'results',
     explain: null,
     explainError: null,
@@ -289,5 +288,85 @@ describe('tab context menu', () => {
         fireEvent.click(menuItem('Close Tabs to the Right'));
         await waitFor(() => expect(names()).toHaveLength(2));
         expect(within(screen.getAllByRole('tab')[1]!).getByText('orders')).toBeTruthy();
+    });
+});
+
+describe('overflow controls and the all-tabs list', () => {
+    const ids = ['q0000000000000011', 'q0000000000000012', 'q0000000000000013'];
+    const mount = () => {
+        open(
+            query(ids[0]!, 'Alpha'),
+            query(ids[1]!, 'Beta', 'select 1', ''),
+            query(ids[2]!, 'Gamma'),
+        );
+        render(<TabStrip />, {
+            wrapper: (p) => (
+                <Harness m={manager()} s={studio()}>
+                    {p.children}
+                </Harness>
+            ),
+        });
+    };
+
+    it('has scroll buttons beside the tabs, not inside them, and the new-tab buttons stay fixed', () => {
+        mount();
+        const list = screen.getByRole('tablist', { name: 'Open tabs' });
+        for (const name of [
+            'Scroll tabs left',
+            'Scroll tabs right',
+            'Show all open tabs',
+            'New query',
+        ]) {
+            const button = screen.getByRole('button', { name });
+            expect(list.contains(button)).toBe(false);
+        }
+        // Nothing overflows here, so neither scroll button can be used.
+        expect(
+            screen.getByRole('button', { name: 'Scroll tabs left' }).hasAttribute('disabled'),
+        ).toBe(true);
+        expect(
+            screen.getByRole('button', { name: 'Scroll tabs right' }).hasAttribute('disabled'),
+        ).toBe(true);
+    });
+
+    it('lists every open tab, marks the unsaved one, and activates the chosen tab', async () => {
+        mount();
+        fireEvent.click(screen.getByRole('button', { name: 'Show all open tabs' }));
+        const options = within(screen.getByRole('listbox', { name: 'Open tabs' })).getAllByRole(
+            'option',
+        );
+        expect(options.map((o) => o.textContent)).toEqual(['Alpha', 'Beta', 'Gamma']);
+        expect(within(options[1]!).getByLabelText('Unsaved changes')).toBeTruthy();
+        expect(within(options[0]!).queryByLabelText('Unsaved changes')).toBeNull();
+
+        fireEvent.click(options[2]!);
+        expect(useStudioStore.getState().activeId).toBe(ids[2]);
+        await waitFor(() => expect(screen.queryByRole('listbox')).toBeNull());
+        expect(screen.getByRole('tab', { name: /Gamma/ }).getAttribute('aria-selected')).toBe(
+            'true',
+        );
+    });
+
+    it('finds a tab by typing in the list and choosing it with the keyboard', async () => {
+        mount();
+        fireEvent.click(screen.getByRole('button', { name: 'Show all open tabs' }));
+        const search = screen.getByRole('combobox', { name: 'Search open tabs' });
+        fireEvent.change(search, { target: { value: 'bet' } });
+        fireEvent.keyDown(search, { key: 'Enter' });
+        expect(useStudioStore.getState().activeId).toBe(ids[1]);
+    });
+
+    it('shows table editors and designers in the same list', () => {
+        mount();
+        openAdminTab(
+            { kind: 'trigger-editor', title: 'New trigger', profileId: 'p' },
+            { fresh: true },
+        );
+        fireEvent.click(screen.getByRole('button', { name: 'Show all open tabs' }));
+        expect(
+            within(screen.getByRole('listbox', { name: 'Open tabs' }))
+                .getAllByRole('option')
+                .map((o) => o.textContent),
+        ).toEqual(['Alpha', 'Beta', 'Gamma', 'New trigger']);
     });
 });

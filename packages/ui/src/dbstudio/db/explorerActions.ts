@@ -5,11 +5,8 @@
 
 import { useMemo } from 'react';
 import {
-    VALIDATOR_TEMPLATE,
     alterViewSql,
     capabilitiesOf,
-    createCollectionStatement,
-    createRoutineTemplate,
     createViewTemplate,
     dialectOf,
     dropCollectionStatement,
@@ -17,18 +14,32 @@ import {
     dropTableSql,
     dropTriggerSql,
     dropViewSql,
+    eventFromDefinition,
+    functionBodyFromDefinition,
     parametersFromDefinition,
     renameCollectionStatement,
     renameTableSql,
-    setValidationStatement,
+    routineFromDefinition,
+    triggerFromDefinition,
+    triggerFunctionName,
     truncateTableSql,
     viewQueryFromDefinition,
-    createTriggerTemplate,
     type DatabaseCapabilities,
     type ObjectName,
 } from '@httpreq/db-admin';
 import { notifications } from '../../kit';
-import { openAdminTab } from '../admin/adminStore';
+import { openAdminTab, type AdminKind } from '../admin/adminStore';
+import {
+    newCollectionModel,
+    newEventModel,
+    newParameter,
+    newRoutineModel,
+    newTriggerModel,
+    routineModelFrom,
+    type EventModel,
+    type TriggerModel,
+} from '../admin/forms/models';
+import { seedEditorState } from '../admin/forms/useAdminTabState';
 import { openAdminDialog } from '../admin/dialogStore';
 import type { ExplorerRow } from './explorerRows';
 import { useProfiles } from './profiles';
@@ -50,7 +61,7 @@ export interface ExplorerActions {
     triggers: (row: ExplorerRow) => void;
     newObject: (
         row: ExplorerRow,
-        kind: 'view' | 'function' | 'procedure' | 'trigger' | 'collection',
+        kind: 'view' | 'function' | 'procedure' | 'trigger' | 'event' | 'collection',
     ) => void;
     editDefinition: (row: ExplorerRow) => Promise<void>;
     runRoutine: (row: ExplorerRow) => void;
@@ -107,6 +118,88 @@ export function useExplorerActions(): ExplorerActions {
 
         const definitionOf = (row: ExplorerRow) => manager.definition(row);
 
+        /** Opens a form editor tab. A new object always gets its own tab. */
+        const openEditor = (
+            kind: AdminKind,
+            row: ExplorerRow,
+            title: string,
+            options: { name?: string; seed: Record<string, unknown> },
+        ) =>
+            openAdminTab(
+                {
+                    kind,
+                    title,
+                    profileId: row.profileId,
+                    database: row.database,
+                    schema: row.schema,
+                    name: options.name,
+                    state: options.seed,
+                },
+                { fresh: !options.name || title.startsWith('New') },
+            );
+
+        /** Opens an existing routine, trigger or event in its form; false when it cannot be read. */
+        const editInForm = async (
+            row: ExplorerRow,
+            engine: string,
+            definition: string,
+        ): Promise<boolean> => {
+            if (engine !== 'mysql' && engine !== 'postgresql') return false;
+            const dialect = dialectOf(engine);
+            const label = row.object ?? row.label;
+            const name = nameOf(row, label);
+            if (row.kind === 'routine') {
+                const kind = row.routineKind === 'procedure' ? 'procedure' : 'function';
+                const design = routineFromDefinition(dialect, definition, name, kind);
+                if (!design) return false;
+                const model = routineModelFrom(design);
+                // A parameter with no name in the definition still needs one to be edited.
+                model.parameters = model.parameters.map((p, i) => ({
+                    ...(p.name ? p : { ...newParameter(), ...p, name: `arg${i + 1}` }),
+                }));
+                openEditor(`${kind}-editor`, row, `${label} (${kind})`, {
+                    name: label,
+                    seed: seedEditorState('routine', model),
+                });
+                return true;
+            }
+            if (row.kind === 'trigger') {
+                const table = row.table ?? '';
+                let body: string | undefined;
+                if (engine === 'postgresql') {
+                    // The body is that of the function the trigger runs.
+                    const fn = triggerFunctionName(definition);
+                    if (!fn) return false;
+                    const text = await manager.db?.definition(row.profileId, {
+                        database: row.database,
+                        schema: fn.schema ?? row.schema,
+                        name: fn.name,
+                        kind: 'function',
+                    });
+                    body = (text && functionBodyFromDefinition(text)) || undefined;
+                    if (body === undefined) return false;
+                }
+                const design = triggerFromDefinition(dialect, definition, name, table, body);
+                if (!design) return false;
+                const model: TriggerModel = { mode: 'edit', original: design, design };
+                openEditor('trigger-editor', row, `${label} (trigger)`, {
+                    name: label,
+                    seed: seedEditorState('trigger', model),
+                });
+                return true;
+            }
+            if (row.kind === 'event' && engine === 'mysql') {
+                const design = eventFromDefinition(definition, name);
+                const model: EventModel = { mode: 'edit', original: design, design };
+                openEditor('event-editor', row, `${label} (event)`, {
+                    name: label,
+                    seed: seedEditorState('event', model),
+                });
+                return true;
+            }
+            return false;
+        };
+
         const actions: ExplorerActions = {
             capabilities: (row) => capabilitiesOf(engineOf(row)),
 
@@ -152,36 +245,70 @@ export function useExplorerActions(): ExplorerActions {
 
             newObject: (row, kind) => {
                 const engine = engineOf(row);
+                const scope = {
+                    database: row.database,
+                    schema: engine === 'postgresql' ? row.schema : undefined,
+                };
+                // Triggers, routines, events and collections are made in a form, not a SQL tab.
                 if (kind === 'collection') {
-                    const text = createCollectionStatement(row.database, 'new_collection', {
-                        validator: VALIDATOR_TEMPLATE,
-                        validationLevel: 'strict',
-                        validationAction: 'error',
+                    openEditor('collection-designer', row, 'New collection', {
+                        seed: seedEditorState(
+                            'collection',
+                            newCollectionModel({ database: row.database }),
+                        ),
                     });
-                    newQuery(row.profileId, text, 'New collection');
+                    return;
+                }
+                if (kind === 'trigger') {
+                    openEditor('trigger-editor', row, 'New trigger', {
+                        name: row.table ?? undefined,
+                        seed: seedEditorState(
+                            'trigger',
+                            newTriggerModel({
+                                database: engine === 'mysql' ? row.database : undefined,
+                                schema: scope.schema,
+                                table: row.table ?? undefined,
+                            }),
+                        ),
+                    });
+                    return;
+                }
+                if (kind === 'event') {
+                    openEditor('event-editor', row, 'New event', {
+                        seed: seedEditorState('event', newEventModel({ database: row.database })),
+                    });
+                    return;
+                }
+                if (kind === 'function' || kind === 'procedure') {
+                    openEditor(`${kind}-editor`, row, `New ${kind}`, {
+                        seed: seedEditorState(
+                            'routine',
+                            newRoutineModel(kind, {
+                                database: engine === 'mysql' ? row.database : undefined,
+                                schema: scope.schema,
+                            }),
+                        ),
+                    });
                     return;
                 }
                 const dialect = dialectOf(engine);
-                const name = {
-                    database: engine === 'mysql' ? row.database : undefined,
-                    schema: engine === 'postgresql' ? row.schema : undefined,
-                };
-                const text =
-                    kind === 'view'
-                        ? createViewTemplate(dialect, name)
-                        : kind === 'trigger'
-                          ? createTriggerTemplate(dialect, {
-                                ...name,
-                                name: row.table ?? 'table_name',
-                            })
-                          : createRoutineTemplate(dialect, kind, name);
-                newQuery(row.profileId, text, `New ${kind}`);
+                newQuery(
+                    row.profileId,
+                    createViewTemplate(dialect, {
+                        database: engine === 'mysql' ? row.database : undefined,
+                        schema: scope.schema,
+                    }),
+                    'New view',
+                );
             },
 
             editDefinition: async (row) => {
                 try {
                     const engine = engineOf(row);
                     const definition = await definitionOf(row);
+                    // A routine, trigger or event opens in its form when its definition can be read
+                    // back; one that cannot is shown as SQL instead of being guessed at.
+                    if (await editInForm(row, engine, definition)) return;
                     let text = definition;
                     if (row.kind === 'view') {
                         const dialect = dialectOf(engine);
@@ -354,15 +481,13 @@ export function useExplorerActions(): ExplorerActions {
 
             editValidation: async (row) => {
                 const label = row.table ?? row.label;
-                newQuery(
-                    row.profileId,
-                    setValidationStatement(row.database, label, {
-                        validator: VALIDATOR_TEMPLATE,
-                        validationLevel: 'strict',
-                        validationAction: 'error',
-                    }),
-                    `${label} (validation)`,
-                );
+                openEditor('collection-designer', row, `${label} (validation)`, {
+                    name: label,
+                    seed: seedEditorState(
+                        'collection',
+                        newCollectionModel({ database: row.database, name: label }),
+                    ),
+                });
             },
         };
         return actions;

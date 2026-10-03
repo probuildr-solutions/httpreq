@@ -118,9 +118,13 @@ export const checkName = (design: TableDesign, check: CheckDesign, index: number
 
 const typeSql = (dialect: SqlDialect, column: ColumnDesign): string => {
     const base = column.type.trim();
+    // PostgreSQL puts the digits before the zone: `timestamp(3) with time zone`.
+    const zoned = /^(time|timestamp)\s+(with(?:out)?\s+time\s+zone)$/i.exec(base);
     const withLength =
         column.length && dialect.lengthTypes.has(base.toLowerCase())
-            ? `${base}(${column.length})`
+            ? zoned
+                ? `${zoned[1]}(${column.length}) ${zoned[2]}`
+                : `${base}(${column.length})`
             : base;
     return dialect.id === 'mysql' && column.unsigned ? `${withLength} UNSIGNED` : withLength;
 };
