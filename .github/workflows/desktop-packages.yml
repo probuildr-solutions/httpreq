@@ -115,14 +115,8 @@ jobs:
                           apps/desktop/release/HttpReq-Setup-*.exe
                           apps/desktop/release/HttpReq-Setup-*.exe.blockmap
                           apps/desktop/release/latest.yml
-                    - name: macOS
-                      platform: mac
-                      os: macos-latest
-                      packages: |
-                          apps/desktop/release/HttpReq-*.pkg
-                          apps/desktop/release/HttpReq-*.zip
-                          apps/desktop/release/HttpReq-*.zip.blockmap
-                          apps/desktop/release/latest-mac.yml
+                    # macOS packaging is skipped for now. Add the macOS entry back (platform: mac, os: macos-latest,
+                    # packages: .pkg, .zip, .zip.blockmap, latest-mac.yml) to release it again.
                     - name: Linux
                       platform: linux
                       os: ubuntu-latest

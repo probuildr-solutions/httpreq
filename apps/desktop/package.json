@@ -1,7 +1,7 @@
 {
     "name": "@httpreq/desktop",
     "productName": "HttpReq",
-    "version": "0.5.1",
+    "version": "0.6.0",
     "description": "Local-first API client for REST requests.",
     "author": {
         "name": "Yamatri Reddy",
