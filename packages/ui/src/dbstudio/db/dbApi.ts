@@ -22,6 +22,11 @@ import type {
     DbRoutineInfo,
     DbSessionInfo,
     DbStudioBridge,
+    DbExportRequest,
+    DbImportRequest,
+    DbScriptTaskRequest,
+    DbTaskSnapshot,
+    DbTaskStarted,
     DbTableInfo,
     DbTestResult,
     DbTriggerInfo,
@@ -120,6 +125,13 @@ export interface DbApi {
     cancelScript(scriptId: string): Promise<void>;
     closeScript(scriptId: string): Promise<void>;
 
+    /** Background tasks. Where a task writes is chosen in a native dialog; the window gets no path. */
+    startExport(request: DbExportRequest): Promise<DbTaskStarted>;
+    startImport(request: DbImportRequest): Promise<DbTaskStarted>;
+    startScriptTask(request: DbScriptTaskRequest): Promise<DbTaskStarted>;
+    listTasks(): Promise<DbTaskSnapshot[]>;
+    taskAction(action: 'cancel' | 'pause' | 'resume' | 'remove', taskId: string): Promise<void>;
+
     /** Subscribes to pushed state: connection status, query state and script progress. */
     onEvent(listener: (event: DbHostEvent) => void): () => void;
 
@@ -181,6 +193,12 @@ export const createDbApi = (bridge: DbStudioBridge): DbApi => {
             ),
         cancelScript: (scriptId) => call<void>('script.cancel', { scriptId }).then(() => undefined),
         closeScript: (scriptId) => call<void>('script.close', { scriptId }).then(() => undefined),
+        startExport: (request) => call('task.export', request),
+        startImport: (request) => call('task.import', request),
+        startScriptTask: (request) => call('task.script', request),
+        listTasks: () => call('task.list'),
+        taskAction: (action, taskId) =>
+            call<void>(`task.${action}` as DbHostOp, { taskId }).then(() => undefined),
         onEvent: (listener) => bridge.onDbEvent(listener),
         setPassword: (profileId, password) => bridge.setDbPassword(profileId, password),
         hasPassword: (profileId) => bridge.hasDbPassword(profileId),

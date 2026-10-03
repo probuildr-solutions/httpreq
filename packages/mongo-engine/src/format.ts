@@ -156,3 +156,20 @@ export class DocumentTable {
         });
     }
 }
+
+/**
+ * The `.asDocuments()` result: a single `document` column with each whole document as the cell, so
+ * nothing is dropped or flattened.
+ */
+export class RawDocumentTable {
+    hidden = 0;
+
+    begin(first?: unknown[]): ColumnMeta[] {
+        void first;
+        return [{ name: 'document', type: 'object' }];
+    }
+
+    rows(documents: { [key: string]: DbValue }[]): DbValue[][] {
+        return documents.map((document) => [document]);
+    }
+}

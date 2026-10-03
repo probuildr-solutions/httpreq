@@ -38,7 +38,7 @@ export const STUDIO_BUDGETS = {
     /** V8 old-space limit for the file host process. */
     fileHostHeapMb: 512,
     /** Files up to this size are edited as a whole in the full editor; larger ones a line at a time. */
-    maxFullEditBytes: 8 * MIB,
+    maxFullEditBytes: 64 * MIB,
     /** Most of one statement or document a single read returns to the UI. */
     maxItemReadBytes: MIB,
     /** Longest statement or document the executors will buffer (later phases). */

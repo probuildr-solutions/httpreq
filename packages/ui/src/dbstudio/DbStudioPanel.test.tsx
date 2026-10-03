@@ -118,6 +118,7 @@ const makeBridge = (options: { size?: number; name?: string } = {}) => {
             },
         })),
         saveFileAs: vi.fn(async () => ({ ok: true as const, value: null })),
+        saveText: vi.fn(async () => ({ ok: true as const, value: null })),
         replaceAll: vi.fn(async () => ({
             ok: true as const,
             value: {
@@ -170,8 +171,10 @@ function Harness({ bridge, children }: { bridge: DbStudioBridge; children?: Reac
 const rowText = (index: number) =>
     document.querySelector(`[data-line="${index}"]`)?.textContent ?? null;
 
+/** Picks a file and chooses to open it in the file editor from the Open file dialog. */
 const openFile = async () => {
     fireEvent.click(screen.getAllByRole('button', { name: /Open file/ })[0]!);
+    fireEvent.click(await screen.findByRole('button', { name: 'Open in file editor' }));
     await screen.findByRole('tab', { selected: true });
 };
 
@@ -248,7 +251,23 @@ describe('opening files', () => {
         }));
         render(<Harness bridge={fake.bridge} />);
         fireEvent.click(screen.getAllByRole('button', { name: /Open file/ })[0]!);
-        expect(await screen.findByText('The file does not exist.')).toBeTruthy();
+        fireEvent.click(await screen.findByRole('button', { name: 'Open in file editor' }));
+        expect((await screen.findAllByText('The file does not exist.')).length).toBeGreaterThan(0);
+    });
+
+    it('asks what to do with the file before opening it', async () => {
+        const fake = makeBridge();
+        render(<Harness bridge={fake.bridge} />);
+        fireEvent.click(screen.getAllByRole('button', { name: /Open file/ })[0]!);
+        await screen.findByRole('button', { name: 'Open in file editor' });
+        expect(fake.bridge.pickFile).toHaveBeenCalled();
+        expect(fake.bridge.openFile).not.toHaveBeenCalled();
+        expect(screen.queryByRole('tab')).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: 'Cancel' }));
+        await waitFor(() =>
+            expect(screen.queryByRole('button', { name: 'Open in file editor' })).toBeNull(),
+        );
+        expect(fake.bridge.openFile).not.toHaveBeenCalled();
     });
 
     it('does nothing when the user cancels the file dialog', async () => {
@@ -278,6 +297,7 @@ describe('opening files', () => {
         render(<Harness bridge={fake.bridge} />);
         await openFile();
         fireEvent.click(screen.getByRole('button', { name: 'Open a file' }));
+        fireEvent.click(await screen.findByRole('button', { name: 'Open in file editor' }));
         await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(2));
         fireEvent.click(screen.getByRole('button', { name: 'Close file2.sql' }));
         await waitFor(() => expect(screen.getAllByRole('tab')).toHaveLength(1));

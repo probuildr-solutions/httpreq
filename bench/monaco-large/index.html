@@ -1,0 +1,172 @@
+<!doctype html>
+<!--
+  Copyright (c) 2026 Yamatri Reddy
+  SPDX-License-Identifier: GPL-3.0-only
+
+  Measures Monaco Editor (the same version the app ships) on a large SQL document in a real
+  Chromium renderer: how long the model takes to build, how much memory it holds, how long a
+  search, a scroll step and an edit take, with and without Large File Mode. See README.md.
+-->
+<html lang="en">
+    <head>
+        <meta charset="utf-8" />
+        <title>Monaco large-file benchmark</title>
+        <style>
+            html,
+            body {
+                margin: 0;
+                height: 100%;
+                font:
+                    13px system-ui,
+                    sans-serif;
+            }
+            #editor {
+                position: absolute;
+                inset: 0 0 0 0;
+                top: 90px;
+            }
+            #bar {
+                height: 90px;
+                padding: 6px 10px;
+                box-sizing: border-box;
+                overflow: auto;
+            }
+            pre {
+                margin: 0;
+                font-size: 12px;
+            }
+        </style>
+    </head>
+    <body>
+        <div id="bar"><pre id="out">idle</pre></div>
+        <div id="editor"></div>
+        <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.53.0/min/vs/loader.js"></script>
+        <script>
+            const out = document.getElementById('out');
+            const log = (line) => {
+                out.textContent += `\n${line}`;
+            };
+            const heapMb = () =>
+                performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : -1;
+            const nextFrame = () =>
+                new Promise((r) => {
+                    requestAnimationFrame(() => r());
+                    setTimeout(r, 60);
+                });
+
+            /** A document of about `mb` megabytes of INSERT statements, built in pieces. */
+            const makeText = (mb) => {
+                const line =
+                    "INSERT INTO `orders` (`id`, `customer`, `note`, `total`) VALUES (12345, 'Customer name here', 'a note with some words', 199.99);\n";
+                const pieces = [];
+                let size = 0;
+                const block = line.repeat(1000);
+                while (size < mb * 1048576) {
+                    pieces.push(block);
+                    size += block.length;
+                }
+                return pieces.join('');
+            };
+
+            window.run = async (mb, largeFileMode) => {
+                out.textContent = `size ${mb} MB, large file mode ${largeFileMode}`;
+                const result = { mb, largeFileMode };
+                await new Promise(
+                    (resolve) =>
+                        require.config({
+                            paths: {
+                                vs: 'https://cdn.jsdelivr.net/npm/monaco-editor@0.53.0/min/vs',
+                            },
+                        }) || require(['vs/editor/editor.main'], resolve),
+                );
+                const monaco = window.monaco;
+                result.heapBefore = heapMb();
+                let t = performance.now();
+                const text = makeText(mb);
+                result.buildStringMs = Math.round(performance.now() - t);
+                t = performance.now();
+                const model = monaco.editor.createModel(text, largeFileMode ? 'plaintext' : 'sql');
+                result.createModelMs = Math.round(performance.now() - t);
+                result.lines = model.getLineCount();
+                const editor = monaco.editor.create(
+                    document.getElementById('editor'),
+                    Object.assign(
+                        { model, automaticLayout: true, minimap: { enabled: !largeFileMode } },
+                        largeFileMode
+                            ? {
+                                  folding: false,
+                                  occurrencesHighlight: 'off',
+                                  quickSuggestions: false,
+                                  bracketPairColorization: { enabled: false },
+                                  hover: { enabled: false },
+                                  links: false,
+                                  largeFileOptimizations: true,
+                                  matchBrackets: 'never',
+                                  wordBasedSuggestions: 'off',
+                              }
+                            : {},
+                    ),
+                );
+                await nextFrame();
+                result.heapAfterModel = heapMb();
+
+                // Timed around the synchronous work only, so a hidden or throttled tab does not skew them.
+                t = performance.now();
+                editor.setScrollTop(editor.getScrollHeight() / 2);
+                result.scrollToMiddleMs = Math.round(performance.now() - t);
+                await nextFrame();
+
+                const steps = [];
+                for (let i = 0; i < 20; i++) {
+                    t = performance.now();
+                    editor.setScrollTop(editor.getScrollTop() + 4000);
+                    steps.push(performance.now() - t);
+                    await new Promise((r) => setTimeout(r, 0));
+                }
+                result.avgScrollStepMs =
+                    Math.round((steps.reduce((x, y) => x + y, 0) / steps.length) * 10) / 10;
+
+                t = performance.now();
+                const matches = model.findMatches(
+                    '99999.99',
+                    false,
+                    false,
+                    false,
+                    null,
+                    false,
+                    1000,
+                );
+                result.searchMs = Math.round(performance.now() - t);
+                result.searchMatches = matches.length;
+
+                const lineCount = model.getLineCount();
+                editor.setPosition({ lineNumber: Math.floor(lineCount / 2), column: 1 });
+                const edits = [];
+                for (let i = 0; i < 10; i++) {
+                    t = performance.now();
+                    editor.trigger('bench', 'type', { text: 'x' });
+                    edits.push(performance.now() - t);
+                    await new Promise((r) => setTimeout(r, 0));
+                }
+                result.avgEditMs =
+                    Math.round((edits.reduce((x, y) => x + y, 0) / edits.length) * 10) / 10;
+                result.maxEditMs = Math.round(Math.max(...edits));
+
+                t = performance.now();
+                for (let i = 0; i < 10; i++) editor.trigger('bench', 'undo', null);
+                result.undoMs = Math.round(performance.now() - t);
+
+                t = performance.now();
+                const content = model.getValue();
+                result.getValueMs = Math.round(performance.now() - t);
+                result.valueLength = content.length;
+                result.heapEnd = heapMb();
+                editor.dispose();
+                model.dispose();
+                window.__result = result;
+                log(JSON.stringify(result));
+                return result;
+            };
+        </script>
+    </body>
+</html>

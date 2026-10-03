@@ -8,6 +8,7 @@ import type { LineSelection, LinePieceTable } from '@httpreq/editor-core';
 import type {
     DbFileOpened,
     DbFileProgress,
+    DbFileRef,
     DbHostStatus,
     DbItemsAnalyzed,
     DbItemsProgress,
@@ -18,8 +19,6 @@ import type {
 } from '@httpreq/shared';
 import type { Journal } from './journal';
 
-/** Files up to this size open in the full text editor; larger ones in the line viewer. */
-export const FULL_EDIT_BYTES = 8 * 1024 * 1024;
 /** Search hits kept for display; the total is counted beyond it. */
 export const MAX_DISPLAYED_HITS = 5_000;
 /** Statements or documents fetched per page of the list. */
@@ -94,6 +93,8 @@ export interface StudioState {
     activeId: string | null;
     /** Opening a file (the dialog and the open call). */
     opening: boolean;
+    /** A file the user picked and has not yet decided what to do with (the Open file dialog). */
+    pending: DbFileRef | null;
     error: string | null;
 }
 
@@ -103,6 +104,7 @@ const INITIAL: StudioState = {
     order: [],
     activeId: null,
     opening: false,
+    pending: null,
     error: null,
 };
 

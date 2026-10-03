@@ -314,10 +314,15 @@ export class MysqlSession implements RelationalSession {
         const schema = this.scopeDatabase(table);
         const name = this.quoteLiteral(table.name);
         const result = await this.meta(
-            `SELECT c.CONSTRAINT_NAME, c.CONSTRAINT_TYPE, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME
+            `SELECT c.CONSTRAINT_NAME, c.CONSTRAINT_TYPE, k.COLUMN_NAME, k.REFERENCED_TABLE_NAME, k.REFERENCED_COLUMN_NAME,
+                    r.DELETE_RULE, r.UPDATE_RULE, ck.CHECK_CLAUSE
              FROM information_schema.TABLE_CONSTRAINTS c
              LEFT JOIN information_schema.KEY_COLUMN_USAGE k
                ON k.CONSTRAINT_SCHEMA = c.CONSTRAINT_SCHEMA AND k.TABLE_NAME = c.TABLE_NAME AND k.CONSTRAINT_NAME = c.CONSTRAINT_NAME
+             LEFT JOIN information_schema.REFERENTIAL_CONSTRAINTS r
+               ON r.CONSTRAINT_SCHEMA = c.CONSTRAINT_SCHEMA AND r.TABLE_NAME = c.TABLE_NAME AND r.CONSTRAINT_NAME = c.CONSTRAINT_NAME
+             LEFT JOIN information_schema.CHECK_CONSTRAINTS ck
+               ON ck.CONSTRAINT_SCHEMA = c.CONSTRAINT_SCHEMA AND ck.CONSTRAINT_NAME = c.CONSTRAINT_NAME AND c.CONSTRAINT_TYPE = 'CHECK'
              WHERE c.TABLE_SCHEMA = ${schema} AND c.TABLE_NAME = ${name}
              ORDER BY c.CONSTRAINT_NAME, k.ORDINAL_POSITION`,
         );
@@ -330,6 +335,10 @@ export class MysqlSession implements RelationalSession {
                 constraint.references ??= { table: text(row[3]), columns: [] };
                 constraint.references.columns.push(text(row[4]));
             }
+            // What a foreign key does when its parent changes, and the condition of a check.
+            if (row[5] !== null && row[6] !== null)
+                constraint.definition = `ON DELETE ${text(row[5])} ON UPDATE ${text(row[6])}`;
+            if (row[7] !== null) constraint.definition = `CHECK (${text(row[7])})`;
             byName.set(key, constraint);
         }
         return [...byName.values()];

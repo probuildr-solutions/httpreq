@@ -4,54 +4,54 @@
  */
 
 import {
-    IconBolt,
     IconChevronDown,
     IconChevronRight,
-    IconColumns,
-    IconDatabase,
-    IconFolder,
     IconDots,
-    IconFunction,
-    IconKey,
     IconPlus,
-    IconServer,
-    IconTable,
-    IconTableOptions,
-    IconClock,
+    IconSearch,
+    IconX,
 } from '@tabler/icons-react';
-import { useMemo, useState } from 'react';
-import {
-    ActionIcon,
-    Menu,
-    StatusDot,
-    Text,
-    TextInput,
-    Tooltip,
-    UnstyledButton,
-    cx,
-} from '../../kit';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ActionIcon, Menu, StatusDot, Text, Tooltip, UnstyledButton, cx } from '../../kit';
 import { confirmAction } from '../../confirm';
 import { notifications } from '../../kit';
-import { buildRows, type ExplorerRow, type RowKind } from './explorerRows';
+import { buildRows, type ExplorerRow } from './explorerRows';
+import { ObjectIcon, type ObjectKind } from '../icons';
 import { openConnectionDialog } from './connectionDialogStore';
 import { useProfiles } from './profiles';
 import { useLive } from './queryStore';
 import { quoteName, startOfQuery } from './engines';
+import { useExplorerActions } from './explorerActions';
 import { useDbManager } from './useDbManager';
 
-const ICONS: Record<RowKind, typeof IconTable> = {
-    connection: IconServer,
-    database: IconDatabase,
-    schema: IconFolder,
-    group: IconTableOptions,
-    table: IconTable,
-    view: IconTable,
-    column: IconColumns,
-    index: IconKey,
-    routine: IconFunction,
-    trigger: IconBolt,
-    event: IconClock,
-    message: IconDots,
+/** The icon kind of an explorer row. */
+const iconKindOf = (row: ExplorerRow): ObjectKind => {
+    switch (row.kind) {
+        case 'connection':
+            return 'server';
+        case 'database':
+            return 'database';
+        case 'schema':
+            return 'schema';
+        case 'group':
+            return 'folder';
+        case 'table':
+            return row.engine === 'mongodb' ? 'collection' : 'table';
+        case 'view':
+            return row.objectKind === 'materialized view' ? 'materializedView' : 'view';
+        case 'column':
+            return row.primaryKey ? 'primaryKey' : 'column';
+        case 'index':
+            return 'index';
+        case 'routine':
+            return row.routineKind === 'procedure' ? 'procedure' : 'function';
+        case 'trigger':
+            return 'trigger';
+        case 'event':
+            return 'event';
+        default:
+            return 'folder';
+    }
 };
 
 const OPEN_LABEL: Record<string, string> = {
@@ -76,6 +76,12 @@ export function ConnectionsSection() {
     const meta = useLive((state) => state.meta);
     const expanded = useLive((state) => state.expanded);
     const [filter, setFilter] = useState('');
+    const [searching, setSearching] = useState(false);
+    const searchRef = useRef<HTMLInputElement>(null);
+
+    useEffect(() => {
+        if (searching) searchRef.current?.focus();
+    }, [searching]);
 
     const rows = useMemo(
         () => buildRows(profiles, status, meta, expanded, filter),
@@ -106,40 +112,101 @@ export function ConnectionsSection() {
         if (answer === 'confirm') await manager.deleteProfile(id);
     };
 
+    // Closing the search always clears it, so the full tree comes straight back; what was expanded
+    // is untouched because filtering never changes the expanded set.
+    const closeSearch = () => {
+        setFilter('');
+        setSearching(false);
+    };
+
     return (
-        <section aria-label="Connections" className="mb-4">
-            <div className="mb-1 flex items-center justify-between">
-                <Text size="xs" className="font-semibold tracking-wide text-dimmed uppercase">
-                    Connections
-                </Text>
-                <Tooltip label="New connection">
-                    <ActionIcon
-                        size="xs"
-                        variant="subtle"
-                        aria-label="New connection"
-                        onClick={() => openConnectionDialog('new')}
-                    >
-                        <IconPlus size={14} />
-                    </ActionIcon>
-                </Tooltip>
+        <section aria-label="Connections" className="flex min-h-0 flex-1 flex-col">
+            {/* A fixed-height strip outside the scrolling tree. Searching swaps its contents in
+                place, so neither the tree nor anything around it moves. */}
+            <div className="box-border flex h-8 flex-none items-center gap-0.5 border-b border-line pr-1.5 pl-3">
+                {searching ? (
+                    <>
+                        <IconSearch size={14} className="flex-none text-dimmed" aria-hidden />
+                        <input
+                            ref={searchRef}
+                            type="text"
+                            role="searchbox"
+                            aria-label="Search connections"
+                            placeholder="Search connections and objects"
+                            value={filter}
+                            onChange={(event) => setFilter(event.target.value)}
+                            onKeyDown={(event) => {
+                                if (event.key === 'Escape') closeSearch();
+                            }}
+                            className="mx-1 h-6 min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-inherit outline-none placeholder:text-dimmed"
+                        />
+                        {filter && (
+                            <ActionIcon
+                                size="xs"
+                                variant="subtle"
+                                aria-label="Clear search"
+                                onClick={() => {
+                                    setFilter('');
+                                    searchRef.current?.focus();
+                                }}
+                            >
+                                <IconX size={13} />
+                            </ActionIcon>
+                        )}
+                        <ActionIcon
+                            size="xs"
+                            variant="subtle"
+                            aria-label="Close search"
+                            onClick={closeSearch}
+                        >
+                            <IconChevronRight size={14} />
+                        </ActionIcon>
+                    </>
+                ) : (
+                    <>
+                        <Text
+                            size="xs"
+                            className="flex-1 font-semibold tracking-wide text-dimmed uppercase"
+                        >
+                            Connections
+                        </Text>
+                        {profiles.length > 0 && (
+                            <Tooltip label="Search connections">
+                                <ActionIcon
+                                    size="xs"
+                                    variant="subtle"
+                                    aria-label="Search connections"
+                                    onClick={() => setSearching(true)}
+                                >
+                                    <IconSearch size={14} />
+                                </ActionIcon>
+                            </Tooltip>
+                        )}
+                        <Tooltip label="New connection">
+                            <ActionIcon
+                                size="xs"
+                                variant="subtle"
+                                aria-label="New connection"
+                                onClick={() => openConnectionDialog('new')}
+                            >
+                                <IconPlus size={14} />
+                            </ActionIcon>
+                        </Tooltip>
+                    </>
+                )}
             </div>
 
-            {profiles.length === 0 ? (
-                <Text size="xs" className="text-dimmed">
-                    Add a MySQL, PostgreSQL, MongoDB or Redis server to browse it and run queries.
-                </Text>
-            ) : (
-                <>
-                    {rows.some((r) => r.kind === 'table' || r.kind === 'group') && (
-                        <TextInput
-                            size="xs"
-                            className="mb-1"
-                            placeholder="Filter objects"
-                            aria-label="Filter objects"
-                            value={filter}
-                            onChange={(e) => setFilter(e.target.value)}
-                        />
-                    )}
+            <div className="min-h-0 flex-1 overflow-auto p-2 [scrollbar-gutter:stable]">
+                {profiles.length === 0 ? (
+                    <Text size="xs" className="text-dimmed">
+                        Add a MySQL, PostgreSQL, MongoDB or Redis server to browse it and run
+                        queries.
+                    </Text>
+                ) : rows.length === 0 ? (
+                    <Text size="xs" className="text-dimmed">
+                        Nothing matches “{filter.trim()}”.
+                    </Text>
+                ) : (
                     <ul role="tree" aria-label="Connections" className="m-0 list-none p-0">
                         {rows.map((row) => (
                             <TreeRow
@@ -170,8 +237,8 @@ export function ConnectionsSection() {
                             />
                         ))}
                     </ul>
-                </>
-            )}
+                )}
+            </div>
         </section>
     );
 }
@@ -187,7 +254,6 @@ function TreeRow({
     onOpen: () => void;
     menu: React.ReactNode;
 }) {
-    const Icon = row.engine === 'redis' && row.kind === 'table' ? IconKey : ICONS[row.kind];
     return (
         <li role="none">
             <div
@@ -223,15 +289,18 @@ function TreeRow({
                     title={row.detail ? `${row.label} · ${row.detail}` : row.label}
                 >
                     {row.kind === 'connection' ? (
-                        <StatusDot
-                            status={
-                                row.status === 'failed' ? 'error' : (row.status ?? 'disconnected')
-                            }
-                        />
+                        <>
+                            <StatusDot
+                                status={
+                                    row.status === 'failed'
+                                        ? 'error'
+                                        : (row.status ?? 'disconnected')
+                                }
+                            />
+                            <ObjectIcon kind="server" />
+                        </>
                     ) : (
-                        row.kind !== 'message' && (
-                            <Icon size={14} className="flex-none text-dimmed" />
-                        )
+                        row.kind !== 'message' && <ObjectIcon kind={iconKindOf(row)} />
                     )}
                     <span className="truncate">{row.label}</span>
                     {row.detail && row.kind !== 'message' && (
@@ -258,10 +327,20 @@ function RowMenu({
     onRemove: () => void;
 }) {
     const manager = useDbManager();
+    const actions = useExplorerActions();
     const profile = useProfiles((state) => state.profiles.find((p) => p.id === row.profileId));
     const engine = profile?.settings.engine ?? 'mysql';
+    const can = actions.capabilities(row);
+    const isTable = row.kind === 'table';
+    const isView = row.kind === 'view';
+    const mongo = engine === 'mongodb';
+    const refresh = (
+        <Menu.Item onClick={() => manager.refreshRow(row)}>
+            {row.kind === 'connection' ? 'Refresh server' : 'Refresh'}
+        </Menu.Item>
+    );
     return (
-        <Menu position="bottom-end" width={200}>
+        <Menu position="bottom-end" width={230}>
             <Menu.Target>
                 <ActionIcon
                     size="xs"
@@ -280,9 +359,7 @@ function RowMenu({
                                 <Menu.Item onClick={() => manager.newQuery(row.profileId)}>
                                     New query
                                 </Menu.Item>
-                                <Menu.Item onClick={() => manager.refresh(row.profileId)}>
-                                    Refresh
-                                </Menu.Item>
+                                {refresh}
                                 <Menu.Item onClick={() => void manager.disconnect(row.profileId)}>
                                     Disconnect
                                 </Menu.Item>
@@ -304,27 +381,137 @@ function RowMenu({
                         </Menu.Item>
                     </>
                 )}
-                {row.kind === 'database' && (
-                    <Menu.Item
-                        onClick={() =>
-                            manager.newQuery(
-                                row.profileId,
-                                startOfQuery(engine, row.database),
-                                row.database,
-                            )
-                        }
-                    >
-                        New query
-                    </Menu.Item>
-                )}
-                {(row.kind === 'table' || row.kind === 'view') && (
+                {(row.kind === 'database' || row.kind === 'schema') && (
                     <>
-                        <Menu.Item onClick={() => void manager.openTable(row)}>
-                            {OPEN_LABEL[engine] ?? 'Select rows'}
+                        <Menu.Item
+                            onClick={() =>
+                                manager.newQuery(
+                                    row.profileId,
+                                    startOfQuery(engine, row.database),
+                                    row.schema ?? row.database,
+                                )
+                            }
+                        >
+                            New query
                         </Menu.Item>
+                        {refresh}
+                        <Menu.Divider />
+                        {can.supportsTableDesigner && (
+                            <Menu.Item onClick={() => actions.newTable(row)}>New table…</Menu.Item>
+                        )}
+                        {mongo && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'collection')}>
+                                New collection…
+                            </Menu.Item>
+                        )}
+                        {can.supportsERDiagram && (
+                            <Menu.Item onClick={() => actions.relationships(row)}>
+                                Show relationships
+                            </Menu.Item>
+                        )}
+                        {can.supportsImport && (
+                            <Menu.Item onClick={() => actions.importData(row)}>
+                                Import a file…
+                            </Menu.Item>
+                        )}
+                        {can.supportsViews && !mongo && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'view')}>
+                                New view…
+                            </Menu.Item>
+                        )}
+                        {can.supportsFunctions && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'function')}>
+                                New function…
+                            </Menu.Item>
+                        )}
+                        {can.supportsProcedures && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'procedure')}>
+                                New stored procedure…
+                            </Menu.Item>
+                        )}
+                    </>
+                )}
+                {row.kind === 'group' && (
+                    <>
+                        <Menu.Item onClick={() => manager.toggle(row)}>
+                            {row.expanded ? 'Collapse' : 'Expand'}
+                        </Menu.Item>
+                        {refresh}
+                        {row.object === 'tables' && can.supportsTableDesigner && (
+                            <Menu.Item onClick={() => actions.newTable(row)}>New table…</Menu.Item>
+                        )}
+                        {row.object === 'tables' && mongo && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'collection')}>
+                                New collection…
+                            </Menu.Item>
+                        )}
+                        {row.object === 'views' && can.supportsViews && !mongo && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'view')}>
+                                New view…
+                            </Menu.Item>
+                        )}
+                        {row.object === 'routines' && can.supportsFunctions && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'function')}>
+                                New function…
+                            </Menu.Item>
+                        )}
+                        {row.object === 'routines' && can.supportsProcedures && (
+                            <Menu.Item onClick={() => actions.newObject(row, 'procedure')}>
+                                New stored procedure…
+                            </Menu.Item>
+                        )}
+                    </>
+                )}
+                {(isTable || isView) && (
+                    <>
+                        {(can.supportsTableEditor || can.supportsDocumentEditor) && (
+                            <Menu.Item onClick={() => actions.openData(row)}>
+                                {mongo ? 'Open documents' : 'Open table data'}
+                            </Menu.Item>
+                        )}
+                        <Menu.Item onClick={() => void manager.openTable(row)}>
+                            {OPEN_LABEL[engine] ?? 'Select rows in a query'}
+                        </Menu.Item>
+                        {isTable && can.supportsTableDesigner && (
+                            <Menu.Item onClick={() => actions.design(row)}>
+                                Edit structure…
+                            </Menu.Item>
+                        )}
+                        {isTable && can.supportsIndexes && (
+                            <Menu.Item onClick={() => actions.indexes(row)}>Indexes…</Menu.Item>
+                        )}
+                        {isTable && can.supportsTriggers && (
+                            <Menu.Item onClick={() => actions.triggers(row)}>Triggers…</Menu.Item>
+                        )}
+                        {isTable && can.supportsERDiagram && (
+                            <Menu.Item onClick={() => actions.relationships(row)}>
+                                Show relationships
+                            </Menu.Item>
+                        )}
+                        <Menu.Divider />
                         <Menu.Item onClick={onDefinition}>
                             {engine === 'redis' ? 'Show key info' : 'Show definition'}
                         </Menu.Item>
+                        {isView && !mongo && (
+                            <Menu.Item onClick={() => void actions.editDefinition(row)}>
+                                Edit view…
+                            </Menu.Item>
+                        )}
+                        {mongo && isTable && can.supportsValidation && (
+                            <Menu.Item onClick={() => void actions.editValidation(row)}>
+                                Edit validation rules…
+                            </Menu.Item>
+                        )}
+                        {isTable && can.supportsExport && (
+                            <Menu.Item onClick={() => actions.exportData(row)}>
+                                Export data…
+                            </Menu.Item>
+                        )}
+                        {isTable && can.supportsImport && (
+                            <Menu.Item onClick={() => actions.importData(row)}>
+                                Import data…
+                            </Menu.Item>
+                        )}
                         <Menu.Item
                             onClick={() =>
                                 void navigator.clipboard?.writeText(qualifiedName(engine, row))
@@ -332,15 +519,57 @@ function RowMenu({
                         >
                             Copy name
                         </Menu.Item>
+                        {refresh}
+                        {engine !== 'redis' && (
+                            <>
+                                <Menu.Divider />
+                                {isTable && !mongo && (
+                                    <Menu.Item color="red" onClick={() => actions.truncate(row)}>
+                                        Delete all rows…
+                                    </Menu.Item>
+                                )}
+                                <Menu.Item onClick={() => actions.rename(row)}>Rename…</Menu.Item>
+                                <Menu.Item color="red" onClick={() => void actions.drop(row)}>
+                                    {isView
+                                        ? 'Drop view…'
+                                        : mongo
+                                          ? 'Drop collection…'
+                                          : 'Drop table…'}
+                                </Menu.Item>
+                            </>
+                        )}
                     </>
                 )}
-                {(row.kind === 'routine' || row.kind === 'trigger' || row.kind === 'event') && (
-                    <Menu.Item onClick={onDefinition}>Show definition</Menu.Item>
+                {row.kind === 'routine' && (
+                    <>
+                        <Menu.Item onClick={() => actions.runRoutine(row)}>Run…</Menu.Item>
+                        <Menu.Item onClick={onDefinition}>Show definition</Menu.Item>
+                        <Menu.Item onClick={() => void actions.editDefinition(row)}>
+                            Edit…
+                        </Menu.Item>
+                        <Menu.Divider />
+                        <Menu.Item color="red" onClick={() => void actions.drop(row)}>
+                            Drop…
+                        </Menu.Item>
+                    </>
                 )}
-                {row.kind === 'group' && (
-                    <Menu.Item onClick={() => manager.toggle(row)}>
-                        {row.expanded ? 'Collapse' : 'Expand'}
-                    </Menu.Item>
+                {row.kind === 'trigger' && (
+                    <>
+                        <Menu.Item onClick={() => actions.triggers(row)}>
+                            Open trigger manager
+                        </Menu.Item>
+                        <Menu.Item onClick={onDefinition}>Show definition</Menu.Item>
+                        <Menu.Item onClick={() => void actions.editDefinition(row)}>
+                            Edit…
+                        </Menu.Item>
+                        <Menu.Divider />
+                        <Menu.Item color="red" onClick={() => void actions.drop(row)}>
+                            Drop trigger…
+                        </Menu.Item>
+                    </>
+                )}
+                {row.kind === 'event' && (
+                    <Menu.Item onClick={onDefinition}>Show definition</Menu.Item>
                 )}
             </Menu.Dropdown>
         </Menu>

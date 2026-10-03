@@ -240,6 +240,8 @@ const dbStudio: DbStudioBridge = {
         ipcRenderer.invoke('dbstudio:edit:save', fileId, pieces, eol),
     saveFileAs: (fileId, pieces, eol) =>
         ipcRenderer.invoke('dbstudio:edit:save-as', fileId, pieces, eol),
+    saveText: (token, suggestedName, text) =>
+        ipcRenderer.invoke('dbstudio:file:save-text', token, suggestedName, text),
     replaceAll: (fileId, query, replacement) =>
         ipcRenderer.invoke('dbstudio:edit:replace-all', fileId, query, replacement),
     onEditProgress: (listener) => subscribe('dbstudio:edit-progress', listener, isDbEditProgress),

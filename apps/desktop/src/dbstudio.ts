@@ -13,7 +13,9 @@ import {
     type IpcMainEvent,
     type IpcMainInvokeEvent,
 } from 'electron';
-import { join } from 'node:path';
+import { randomBytes } from 'node:crypto';
+import { rename, rm, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { DbError, STUDIO_BUDGETS, toDbError } from '@httpreq/db-core';
 import { WorkerSupervisor, type WorkerTransport } from '@httpreq/db-workers';
 import { FileHandleRegistry, displayName, statFile } from '@httpreq/file-engine';
@@ -94,6 +96,14 @@ const parseSearchQuery = (value: unknown): DbSearchQuery => {
         wholeWord: query.wholeWord === true,
     };
 };
+
+/** A file name offered to the save dialog: no path separators, reserved characters or controls. */
+const safeFileName = (value: string): string =>
+    Array.from(value, (char) =>
+        char.charCodeAt(0) < 32 || '\\/:*?"<>|'.includes(char) ? '_' : char,
+    )
+        .join('')
+        .slice(0, 120);
 
 const isFileId = (value: unknown): value is string =>
     typeof value === 'string' && /^[0-9a-f]{16}$/.test(value);
@@ -366,6 +376,76 @@ export const registerDbStudio = ({ isTrustedSender, fileHostPath }: DbStudioDeps
             }),
     );
 
+    /** The largest script a query tab may save: query text, not data. */
+    const MAX_SAVED_TEXT_BYTES = 64 * 1024 * 1024;
+
+    ipcMain.handle(
+        'dbstudio:file:save-text',
+        (event, token: unknown, suggestedName: unknown, text: unknown) =>
+            guard(
+                event,
+                async (): Promise<{ token: string; name: string; size: number } | null> => {
+                    if (
+                        typeof text !== 'string' ||
+                        Buffer.byteLength(text, 'utf8') > MAX_SAVED_TEXT_BYTES
+                    ) {
+                        throw new DbError(
+                            'LIMIT_EXCEEDED',
+                            'That text is too large to save from a query tab.',
+                        );
+                    }
+                    let path: string;
+                    let granted: string | null = null;
+                    if (token !== null && token !== undefined) {
+                        // Overwrites only a file this window itself chose.
+                        path = registry.resolve(token, event.sender.id);
+                        granted = token as string;
+                    } else {
+                        const name =
+                            typeof suggestedName === 'string'
+                                ? safeFileName(suggestedName)
+                                : 'query.sql';
+                        const window = BrowserWindow.fromWebContents(event.sender);
+                        const options = {
+                            title: 'Save script',
+                            defaultPath: /\.[A-Za-z0-9]+$/.test(name)
+                                ? name
+                                : `${name || 'query'}.sql`,
+                            filters: [
+                                { name: 'SQL and script files', extensions: ['sql', 'js', 'txt'] },
+                                { name: 'All files', extensions: ['*'] },
+                            ],
+                        };
+                        const chosen = window
+                            ? await dialog.showSaveDialog(window, options)
+                            : await dialog.showSaveDialog(options);
+                        // The destination comes from the native dialog, never from the renderer.
+                        if (chosen.canceled || !chosen.filePath) return null;
+                        path = chosen.filePath;
+                    }
+                    // Written beside the destination and renamed over it, so a failure (a full disk,
+                    // a removed folder) leaves the old file whole instead of half written.
+                    const temporary = join(
+                        dirname(path),
+                        `.${basename(path)}.${randomBytes(4).toString('hex')}.tmp`,
+                    );
+                    try {
+                        await writeFile(temporary, text, 'utf8');
+                        await rename(temporary, path);
+                    } catch (error) {
+                        await rm(temporary, { force: true }).catch(() => undefined);
+                        throw toDbError(error);
+                    }
+                    const size = Buffer.byteLength(text, 'utf8');
+                    return {
+                        token: granted ?? registry.grant(path, event.sender.id),
+                        name: displayName(path),
+                        size,
+                    };
+                },
+            ),
+    );
+
     ipcMain.handle('dbstudio:file:close', (event, fileId: unknown) =>
         guard(event, async (): Promise<void> => {
             const id = owned(event, fileId);
@@ -394,9 +474,18 @@ export const registerDbStudio = ({ isTrustedSender, fileHostPath }: DbStudioDeps
         await host.stop();
     };
 
+    /** The path a file token stands for in a window (main process only). */
+    const pathOfToken = (senderId: number, token: unknown): string | undefined => {
+        try {
+            return registry.resolve(token, senderId);
+        } catch {
+            return undefined;
+        }
+    };
+
     /** The path of a file the given window opened (main process only). */
     const pathOfFile = (senderId: number, fileId: string): string | undefined =>
         owners.get(fileId) === senderId ? filePaths.get(fileId) : undefined;
 
-    return { releaseSender, dispose, pathOfFile };
+    return { releaseSender, dispose, pathOfFile, pathOfToken };
 };

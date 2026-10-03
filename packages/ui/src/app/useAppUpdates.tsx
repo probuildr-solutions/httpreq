@@ -108,6 +108,15 @@ function useNativeUpdates(desktop: DesktopBridge | undefined, enabled: boolean) 
                         });
                     }
                     break;
+                case 'installing':
+                    notifications.show({
+                        id: 'update-installing',
+                        color: 'violet',
+                        autoClose: false,
+                        title: 'Installing update',
+                        message: 'HttpReq will restart in a moment.',
+                    });
+                    break;
                 case 'error':
                     // A failed update never affects the running version. If the new version is
                     // known, it can still be downloaded by hand.
@@ -211,7 +220,38 @@ export function useAppUpdates({ checkForUpdates, build, desktop, version }: Opti
                         message: `You are up to date: HttpReq ${version ?? ''} is the latest version.`,
                     });
                 } else if (state.status === 'error') {
-                    throw new Error(state.error ?? 'The update could not be completed.');
+                    notifications.show({
+                        color: 'red',
+                        title: 'Update failed',
+                        message: (
+                            <Group gap="xs" className="mt-1">
+                                <Text size="sm">
+                                    {state.error ?? 'The update could not be completed.'}
+                                </Text>
+                                {state.diagnostics && (
+                                    <Text
+                                        size="xs"
+                                        className="opacity-70"
+                                        title="Technical details"
+                                    >
+                                        {state.diagnostics}
+                                        {state.currentVersion
+                                            ? ` · v${state.currentVersion} ${state.platform}-${state.arch}`
+                                            : ''}
+                                    </Text>
+                                )}
+                                {state.errorKind === 'feed-not-found' && (
+                                    <Button
+                                        size="compact-xs"
+                                        variant="light"
+                                        onClick={() => desktop.openExternal(RELEASES_URL)}
+                                    >
+                                        Open releases
+                                    </Button>
+                                )}
+                            </Group>
+                        ),
+                    });
                 }
                 return;
             }

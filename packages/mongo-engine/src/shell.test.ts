@@ -366,3 +366,30 @@ describe('splitShellStatements', () => {
         expect(text.slice(second!.start, second!.end)).toBe('db.b.find({})');
     });
 });
+
+describe('asDocuments', () => {
+    it('asks for whole documents and still sends a plain find', () => {
+        const plan = parseStatement(
+            'db.orders.find({ a: 1 }).sort({ a: -1 }).limit(5).asDocuments()',
+            'shop',
+        );
+        expect(plan).toMatchObject({
+            kind: 'command',
+            documents: true,
+            command: { find: 'orders', filter: { a: 1 }, sort: { a: -1 }, limit: 5 },
+        });
+        // nothing extra reaches the server
+        expect(Object.keys((plan as { command: object }).command)).not.toContain('asDocuments');
+        expect(parseStatement('db.orders.find({})', 'shop')).not.toHaveProperty('documents', true);
+    });
+});
+
+describe('getSiblingDB', () => {
+    it('runs on the named database without changing the current one', () => {
+        const plan = parseStatement('db.getSiblingDB("other").getCollection("c").find({})', 'shop');
+        expect(plan).toMatchObject({ kind: 'command', database: 'other', command: { find: 'c' } });
+        expect(
+            parseStatement('db.getSiblingDB("other").c.countDocuments({})', 'shop'),
+        ).toMatchObject({ database: 'other' });
+    });
+});

@@ -11,6 +11,8 @@ import { PANEL } from '../ssh/styles';
 import { ConnectionDialog } from './db/ConnectionDialog';
 import { ConnectionsSection } from './db/ConnectionsSection';
 import { useDbManager } from './db/useDbManager';
+import { AdminDialogs } from './admin/AdminDialogs';
+import { OpenFileDialog } from './OpenFileDialog';
 import { isDirty, useStudioStore } from './studioStore';
 import { useDbStudio } from './useDbStudio';
 
@@ -33,19 +35,30 @@ export function DbStudioPanel() {
         <div className={PANEL}>
             <PanelHeader title="Database Studio" />
 
-            <div className="min-h-0 flex-1 overflow-auto p-3">
-                {!api.available ? (
-                    <Text size="sm" className="text-dimmed">
-                        Database Studio is part of the desktop app.
-                    </Text>
-                ) : (
-                    <>
-                        {manager.available && (
-                            <>
-                                <ConnectionsSection />
-                                <ConnectionDialog />
-                            </>
+            {!api.available ? (
+                <Text size="sm" className="p-3 text-dimmed">
+                    Database Studio is part of the desktop app.
+                </Text>
+            ) : (
+                <>
+                    {/* The connections tree owns the remaining height and scrolls inside itself, below
+                        its fixed header; the files below it scroll within their own capped area. */}
+                    <OpenFileDialog />
+                    <AdminDialogs />
+                    {manager.available && (
+                        <>
+                            <ConnectionsSection />
+                            <ConnectionDialog />
+                        </>
+                    )}
+                    <div
+                        className={cx(
+                            'min-h-0 overflow-auto p-3',
+                            manager.available
+                                ? 'max-h-[45%] flex-none border-t border-line'
+                                : 'flex-1',
                         )}
+                    >
                         <div className="mb-3 text-center">
                             {order.length === 0 && (
                                 <>
@@ -119,9 +132,9 @@ export function DbStudioPanel() {
                                 })}
                             </ul>
                         )}
-                    </>
-                )}
-            </div>
+                    </div>
+                </>
+            )}
         </div>
     );
 }

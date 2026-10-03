@@ -3,8 +3,14 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import { useEffect, useState } from 'react';
-import type { DbConnectionSettings, DbTestResult, DbTlsMode } from '@httpreq/shared';
+import { IconChevronDown, IconChevronRight } from '@tabler/icons-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+    explainConnectionFailure,
+    type ConnectionFailure,
+    type DbTestResult,
+    type DbTlsMode,
+} from '@httpreq/shared';
 import { AppModal } from '../../AppModal';
 import {
     Alert,
@@ -13,9 +19,23 @@ import {
     PasswordInput,
     Select,
     Stack,
+    Switch,
     Text,
     TextInput,
+    Textarea,
+    UnstyledButton,
 } from '../../kit';
+import {
+    applyString,
+    blankForm,
+    extraParametersText,
+    formFromProfile,
+    isSupportedStringEngine,
+    settingsOf,
+    stringOf,
+    withExtraParameters,
+    type ConnectionForm,
+} from './connectionForm';
 import { useConnectionDialog } from './connectionDialogStore';
 import { newProfileId, useProfiles, type ConnectionProfile } from './profiles';
 import { useDbManager } from './useDbManager';
@@ -43,73 +63,19 @@ const AUTH_MECHANISMS = [
     { value: 'SCRAM-SHA-1', label: 'SCRAM-SHA-1' },
 ];
 
-interface Form {
-    name: string;
-    engine: string;
-    host: string;
-    port: number | string;
-    username: string;
-    password: string;
-    database: string;
-    tls: DbTlsMode;
-    ca: string;
-    queryTimeoutSeconds: number | string;
-    /** MongoDB: where the user is defined, and how to log in. */
-    authSource: string;
-    authMechanism: string;
-}
+const READ_PREFERENCES = [
+    { value: '', label: 'Primary (default)' },
+    { value: 'primaryPreferred', label: 'Primary preferred' },
+    { value: 'secondary', label: 'Secondary' },
+    { value: 'secondaryPreferred', label: 'Secondary preferred' },
+    { value: 'nearest', label: 'Nearest' },
+];
 
-const blank = (engine: string, port: number): Form => ({
-    name: '',
-    engine,
-    host: '127.0.0.1',
-    port,
-    username: '',
-    password: '',
-    database: '',
-    tls: 'prefer',
-    ca: '',
-    queryTimeoutSeconds: 0,
-    authSource: '',
-    authMechanism: '',
-});
-
-const fromProfile = (profile: ConnectionProfile): Form => ({
-    name: profile.name,
-    engine: profile.settings.engine,
-    host: profile.settings.host,
-    port: profile.settings.port,
-    username: profile.settings.username ?? '',
-    password: '',
-    database: profile.settings.database ?? '',
-    tls: profile.settings.tls.mode,
-    ca: profile.settings.tls.ca ?? '',
-    queryTimeoutSeconds: Math.round((profile.settings.queryTimeoutMs ?? 0) / 1000),
-    authSource: profile.settings.options?.authSource ?? '',
-    authMechanism: profile.settings.options?.authMechanism ?? '',
-});
-
-const optionsOf = (form: Form): Record<string, string> => ({
-    ...(form.engine === 'mongodb' && form.authSource.trim()
-        ? { authSource: form.authSource.trim() }
-        : {}),
-    ...(form.engine === 'mongodb' && form.authMechanism
-        ? { authMechanism: form.authMechanism }
-        : {}),
-});
-
-const settingsOf = (form: Form): DbConnectionSettings => ({
-    engine: form.engine,
-    host: form.host.trim(),
-    port: Number(form.port),
-    ...(form.database.trim() ? { database: form.database.trim() } : {}),
-    ...(form.username.trim() ? { username: form.username.trim() } : {}),
-    tls: { mode: form.tls, ...(form.ca.trim() ? { ca: form.ca } : {}) },
-    ...(Number(form.queryTimeoutSeconds) > 0
-        ? { queryTimeoutMs: Number(form.queryTimeoutSeconds) * 1000 }
-        : {}),
-    ...(Object.keys(optionsOf(form)).length > 0 ? { options: optionsOf(form) } : {}),
-});
+const FLAG = [
+    { value: '', label: 'Default' },
+    { value: 'true', label: 'On' },
+    { value: 'false', label: 'Off' },
+];
 
 /** Creates or edits a saved connection, and tests it before saving if asked. */
 export function ConnectionDialog() {
@@ -120,45 +86,87 @@ export function ConnectionDialog() {
     const engines = manager.engines.length > 0 ? manager.engines : DEFAULT_ENGINES;
 
     const existing = target && target !== 'new' ? profiles.find((p) => p.id === target) : undefined;
-    const [form, setForm] = useState<Form>(blank('mysql', 3306));
+    const [form, setForm] = useState<ConnectionForm>(blankForm('mysql', 3306));
     const [hasPassword, setHasPassword] = useState(false);
     const [testing, setTesting] = useState(false);
     const [test, setTest] = useState<
-        { ok: true; result: DbTestResult } | { ok: false; message: string } | null
+        { ok: true; result: DbTestResult } | { ok: false; failure: ConnectionFailure } | null
     >(null);
     const [saving, setSaving] = useState(false);
+    /** The string as the user is typing it; shown instead of the generated one while editing. */
+    const [draft, setDraft] = useState<string | null>(null);
+    const [stringError, setStringError] = useState<string | null>(null);
+    const [advanced, setAdvanced] = useState(false);
+    const [extra, setExtra] = useState('');
+    const extraFocused = useRef(false);
 
     useEffect(() => {
         if (!target) return;
         setTest(null);
         setSaving(false);
-        setForm(existing ? fromProfile(existing) : blank(engines[0]!.id, engines[0]!.defaultPort));
+        setDraft(null);
+        setStringError(null);
+        const initial = existing
+            ? formFromProfile(existing)
+            : blankForm(engines[0]!.id, engines[0]!.defaultPort);
+        setForm(initial);
+        setExtra(extraParametersText(initial));
+        setAdvanced(false);
         setHasPassword(false);
         if (existing) void manager.db?.hasPassword(existing.id).then(setHasPassword);
         // Reset only when the dialog opens for a target.
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [target]);
 
-    const set = <K extends keyof Form>(key: K, value: Form[K]) => {
-        setForm((current) => ({ ...current, [key]: value }));
+    const update = (changes: Partial<ConnectionForm>) => {
+        setForm((current) => {
+            const next = { ...current, ...changes };
+            if (!extraFocused.current) setExtra(extraParametersText(next));
+            return next;
+        });
+        setDraft(null);
+        setStringError(null);
         setTest(null);
+    };
+    const setOption = (key: string, value: string) =>
+        update({ options: { ...form.options, [key]: value } });
+
+    const generated = useMemo(() => stringOf(form), [form]);
+    const supportsString = isSupportedStringEngine(form.engine);
+    const srv = form.engine === 'mongodb' && form.options.srv === 'true';
+
+    /** Reads a connection string into the form. Returns whether it was accepted. */
+    const apply = (text: string): boolean => {
+        const result = applyString(form, text);
+        if (!result.ok) {
+            setStringError(result.error.message);
+            return false;
+        }
+        setStringError(null);
+        setForm(result.form);
+        setExtra(extraParametersText(result.form));
+        setTest(null);
+        return true;
     };
 
     const port = Number(form.port);
-    const valid = form.host.trim() !== '' && Number.isInteger(port) && port > 0 && port < 65536;
+    const valid =
+        form.host.trim() !== '' &&
+        (srv || (Number.isInteger(port) && port > 0 && port < 65536)) &&
+        stringError === null;
 
     const runTest = async () => {
         setTesting(true);
         setTest(null);
         try {
             const result = await manager.testConnection(
-                settingsOf(form),
+                settingsOf({ ...form, port: srv ? 27017 : form.port }),
                 existing?.id ?? newProfileId(),
                 form.password !== '' ? form.password : undefined,
             );
             setTest({ ok: true, result });
         } catch (error) {
-            setTest({ ok: false, message: error instanceof Error ? error.message : String(error) });
+            setTest({ ok: false, failure: explainConnectionFailure(error) });
         } finally {
             setTesting(false);
         }
@@ -168,8 +176,8 @@ export function ConnectionDialog() {
         setSaving(true);
         const profile: ConnectionProfile = {
             id: existing?.id ?? newProfileId(),
-            name: form.name.trim() || `${form.host.trim()}:${port}`,
-            settings: settingsOf(form),
+            name: form.name.trim() || `${form.host.trim()}${srv ? '' : `:${port}`}`,
+            settings: settingsOf({ ...form, port: srv ? 27017 : form.port }),
             group: existing?.group ?? '',
             favorite: existing?.favorite ?? false,
             lastUsed: existing?.lastUsed ?? null,
@@ -220,7 +228,7 @@ export function ConnectionDialog() {
                     label="Name"
                     placeholder="Local MySQL"
                     value={form.name}
-                    onChange={(e) => set('name', e.target.value)}
+                    onChange={(e) => update({ name: e.target.value })}
                 />
                 <Select
                     label="Database"
@@ -229,30 +237,93 @@ export function ConnectionDialog() {
                     onChange={(value) => {
                         if (!value) return;
                         const engine = engines.find((e) => e.id === value);
-                        setForm((current) => ({
-                            ...current,
+                        update({
                             engine: value,
-                            port: engine?.defaultPort ?? current.port,
-                        }));
-                        setTest(null);
+                            port: engine?.defaultPort ?? form.port,
+                            options: {},
+                        });
+                        setExtra('');
                     }}
                 />
+                {supportsString && (
+                    <TextInput
+                        label="Connection string"
+                        description="Paste a URL to fill in the fields below, or edit the fields to update it. The password is hidden."
+                        placeholder={
+                            form.engine === 'mongodb'
+                                ? 'mongodb+srv://user:password@cluster.example.net/database'
+                                : form.engine === 'postgresql'
+                                  ? 'postgresql://user:password@host:5432/database'
+                                  : form.engine === 'redis'
+                                    ? 'redis://user:password@host:6379/0'
+                                    : 'mysql://user:password@host:3306/database'
+                        }
+                        autoComplete="off"
+                        spellCheck={false}
+                        error={stringError ?? undefined}
+                        value={draft ?? generated}
+                        onPaste={(event) => {
+                            const text = event.clipboardData.getData('text');
+                            if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(text.trim())) return;
+                            // A pasted string is applied at once and shown masked, so a password in
+                            // it is never displayed.
+                            event.preventDefault();
+                            if (apply(text.trim())) setDraft(null);
+                            else
+                                setDraft(
+                                    text.trim().replace(/(:\/\/[^:/?#@\s]*:)[^@\s]*@/, '$1****@'),
+                                );
+                        }}
+                        onChange={(event) => {
+                            setDraft(event.target.value);
+                            apply(event.target.value);
+                        }}
+                        onBlur={() => {
+                            if (stringError === null) setDraft(null);
+                        }}
+                    />
+                )}
                 <div className="flex gap-2">
                     <TextInput
                         className="min-w-0 flex-1"
-                        label="Host"
+                        label={srv ? 'Cluster' : 'Host'}
+                        description={
+                            srv ? 'Resolved through DNS SRV records when you connect' : undefined
+                        }
                         value={form.host}
-                        onChange={(e) => set('host', e.target.value)}
+                        onChange={(e) => update({ host: e.target.value })}
                     />
-                    <NumberInput
-                        label="Port"
-                        w={100}
-                        min={1}
-                        max={65535}
-                        value={form.port}
-                        onChange={(value) => set('port', value)}
-                    />
+                    {!srv && (
+                        <NumberInput
+                            label="Port"
+                            w={100}
+                            min={1}
+                            max={65535}
+                            value={form.port}
+                            onChange={(value) => update({ port: value })}
+                        />
+                    )}
                 </div>
+                {form.engine === 'mongodb' && (
+                    <>
+                        <Switch
+                            label="Use a DNS seed list (mongodb+srv), as for MongoDB Atlas"
+                            checked={srv}
+                            onChange={(event) =>
+                                setOption('srv', event.currentTarget.checked ? 'true' : '')
+                            }
+                        />
+                        {!srv && (
+                            <TextInput
+                                label="Additional hosts"
+                                description="Other replica set members, as host:port separated by commas"
+                                placeholder="b.example.com:27017,c.example.com:27017"
+                                value={form.options.seeds ?? ''}
+                                onChange={(e) => setOption('seeds', e.target.value)}
+                            />
+                        )}
+                    </>
+                )}
                 <div className="flex gap-2">
                     <TextInput
                         className="min-w-0 flex-1"
@@ -262,7 +333,7 @@ export function ConnectionDialog() {
                         }
                         autoComplete="off"
                         value={form.username}
-                        onChange={(e) => set('username', e.target.value)}
+                        onChange={(e) => update({ username: e.target.value })}
                     />
                     <PasswordInput
                         className="min-w-0 flex-1"
@@ -270,7 +341,7 @@ export function ConnectionDialog() {
                         autoComplete="new-password"
                         placeholder={hasPassword ? 'Saved; type to replace' : ''}
                         value={form.password}
-                        onChange={(e) => set('password', e.target.value)}
+                        onChange={(e) => update({ password: e.target.value })}
                     />
                 </div>
                 <Text size="xs" className="-mt-2 text-dimmed">
@@ -281,23 +352,31 @@ export function ConnectionDialog() {
                     label={form.engine === 'redis' ? 'Database index' : 'Default database'}
                     description={DATABASE_HINTS[form.engine] ?? 'Optional'}
                     value={form.database}
-                    onChange={(e) => set('database', e.target.value)}
+                    onChange={(e) => update({ database: e.target.value })}
                 />
+                {form.engine === 'postgresql' && (
+                    <TextInput
+                        label="Schema search path"
+                        description="Schemas searched for unqualified names, for example sales,public"
+                        value={form.options.searchPath ?? ''}
+                        onChange={(e) => setOption('searchPath', e.target.value)}
+                    />
+                )}
                 {form.engine === 'mongodb' && (
                     <div className="flex gap-2">
                         <TextInput
                             className="min-w-0 flex-1"
                             label="Auth source"
                             description="Where the user is defined; admin when empty"
-                            value={form.authSource}
-                            onChange={(e) => set('authSource', e.target.value)}
+                            value={form.options.authSource ?? ''}
+                            onChange={(e) => setOption('authSource', e.target.value)}
                         />
                         <Select
                             className="min-w-0 flex-1"
                             label="Login method"
                             data={AUTH_MECHANISMS}
-                            value={form.authMechanism}
-                            onChange={(value) => set('authMechanism', value ?? '')}
+                            value={form.options.authMechanism ?? ''}
+                            onChange={(value) => setOption('authMechanism', value ?? '')}
                         />
                     </div>
                 )}
@@ -310,24 +389,115 @@ export function ConnectionDialog() {
                     }
                     data={TLS_MODES}
                     value={form.tls}
-                    onChange={(value) => value && set('tls', value as DbTlsMode)}
+                    onChange={(value) => value && update({ tls: value as DbTlsMode })}
                 />
                 {(form.tls === 'verify-ca' || form.tls === 'verify-full') && (
                     <TextInput
                         label="CA certificate (PEM)"
                         description="Leave empty to use the system's trusted authorities"
                         value={form.ca}
-                        onChange={(e) => set('ca', e.target.value)}
+                        onChange={(e) => update({ ca: e.target.value })}
                     />
                 )}
-                <NumberInput
-                    label="Statement timeout"
-                    description="Seconds before a running statement is cancelled; 0 for none"
-                    min={0}
-                    max={86_400}
-                    value={form.queryTimeoutSeconds}
-                    onChange={(value) => set('queryTimeoutSeconds', value)}
-                />
+
+                <UnstyledButton
+                    className="flex items-center gap-1 text-left text-sm font-medium"
+                    aria-expanded={advanced}
+                    onClick={() => setAdvanced((value) => !value)}
+                >
+                    {advanced ? <IconChevronDown size={14} /> : <IconChevronRight size={14} />}
+                    Advanced
+                </UnstyledButton>
+                {advanced && (
+                    <Stack gap="sm">
+                        <div className="flex gap-2">
+                            <NumberInput
+                                className="min-w-0 flex-1"
+                                label="Connection timeout"
+                                description="Seconds to wait for the server"
+                                min={1}
+                                max={120}
+                                value={form.connectTimeoutSeconds}
+                                onChange={(value) => update({ connectTimeoutSeconds: value })}
+                            />
+                            <NumberInput
+                                className="min-w-0 flex-1"
+                                label="Statement timeout"
+                                description="Seconds before a statement is cancelled; 0 for none"
+                                min={0}
+                                max={86_400}
+                                value={form.queryTimeoutSeconds}
+                                onChange={(value) => update({ queryTimeoutSeconds: value })}
+                            />
+                        </div>
+                        {form.engine === 'mongodb' && (
+                            <>
+                                <div className="flex gap-2">
+                                    <TextInput
+                                        className="min-w-0 flex-1"
+                                        label="Replica set"
+                                        value={form.options.replicaSet ?? ''}
+                                        onChange={(e) => setOption('replicaSet', e.target.value)}
+                                    />
+                                    <Select
+                                        className="min-w-0 flex-1"
+                                        label="Read preference"
+                                        data={READ_PREFERENCES}
+                                        value={form.options.readPreference ?? ''}
+                                        onChange={(value) =>
+                                            setOption('readPreference', value ?? '')
+                                        }
+                                    />
+                                </div>
+                                <div className="flex gap-2">
+                                    <TextInput
+                                        className="min-w-0 flex-1"
+                                        label="Write concern (w)"
+                                        placeholder="majority or a number"
+                                        value={form.options.w ?? ''}
+                                        onChange={(e) => setOption('w', e.target.value)}
+                                    />
+                                    <Select
+                                        className="min-w-0 flex-1"
+                                        label="Retry writes"
+                                        data={FLAG}
+                                        value={form.options.retryWrites ?? ''}
+                                        onChange={(value) => setOption('retryWrites', value ?? '')}
+                                    />
+                                    <Select
+                                        className="min-w-0 flex-1"
+                                        label="Retry reads"
+                                        data={FLAG}
+                                        value={form.options.retryReads ?? ''}
+                                        onChange={(value) => setOption('retryReads', value ?? '')}
+                                    />
+                                </div>
+                            </>
+                        )}
+                        {form.engine === 'postgresql' && (
+                            <TextInput
+                                label="Application name"
+                                value={form.options.application_name ?? ''}
+                                onChange={(e) => setOption('application_name', e.target.value)}
+                            />
+                        )}
+                        <Textarea
+                            label="Additional parameters"
+                            description="One key=value per line; kept in the connection string"
+                            minRows={2}
+                            value={extra}
+                            onFocus={() => {
+                                extraFocused.current = true;
+                            }}
+                            onChange={(event) => setExtra(event.target.value)}
+                            onBlur={() => {
+                                extraFocused.current = false;
+                                update(withExtraParameters(form, extra));
+                            }}
+                        />
+                    </Stack>
+                )}
+
                 {test?.ok && (
                     <Alert color="teal">
                         Connected to {test.result.server?.product} {test.result.server?.version} in{' '}
@@ -335,7 +505,16 @@ export function ConnectionDialog() {
                         {test.result.server?.secure ? ' over TLS' : ' without TLS'}.
                     </Alert>
                 )}
-                {test && !test.ok && <Alert color="red">{test.message}</Alert>}
+                {test && !test.ok && (
+                    <Alert color="red" title={test.failure.title}>
+                        <Text size="sm">{test.failure.hint}</Text>
+                        {test.failure.detail && (
+                            <Text size="xs" className="mt-1 break-words opacity-70">
+                                {test.failure.detail}
+                            </Text>
+                        )}
+                    </Alert>
+                )}
             </Stack>
         </AppModal>
     );

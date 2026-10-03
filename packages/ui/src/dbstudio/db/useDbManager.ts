@@ -24,6 +24,8 @@ import { confirmAction } from '../../confirm';
 import { notifications } from '../../kit';
 import { useStudioStore } from '../studioStore';
 import { createDbApi, DbApiError, type DbApi } from './dbApi';
+import { createDbOps, type DbOps } from './dbOps';
+import { applyTaskSnapshot, markTasksLost } from '../tasks/taskStore';
 import {
     buildRows,
     loadsFor,
@@ -33,7 +35,7 @@ import {
     type ExplorerRow,
     type MetaEntry,
 } from './explorerRows';
-import { layoutOf, statementsToOpen } from './engines';
+import { layoutOf, startOfScript, statementsToOpen } from './engines';
 import { newProfileId, useProfiles, type ConnectionProfile } from './profiles';
 import {
     isQueryTabId,
@@ -65,11 +67,24 @@ export interface DbManagerApi {
 
     toggle: (row: ExplorerRow) => void;
     refresh: (profileId: string) => void;
+    /** Reloads one node's children (a database, schema, group, table) without reconnecting. */
+    refreshRow: (row: ExplorerRow) => void;
     definition: (row: ExplorerRow) => Promise<string>;
+    /** Reads a list of schema objects straight from the server, bypassing the explorer's cache. */
+    listMeta: (
+        profileId: string,
+        kind: string,
+        scope?: { database?: string; schema?: string; name?: string },
+    ) => Promise<unknown[]>;
+    /** Runs statements and reads rows from code (the table browser, the designer, dialogs). */
+    readonly ops: DbOps | null;
+    /** Chooses the database and schema a query tab runs in. */
+    setContext: (id: string, context: { database?: string | null; schema?: string | null }) => void;
 
     newQuery: (profileId: string | null, text?: string, title?: string) => string;
     openTable: (row: ExplorerRow) => Promise<string>;
-    closeQuery: (id: string) => Promise<void>;
+    /** Closes a query tab. `silent` skips the open-transaction question (a bulk close asks once). */
+    closeQuery: (id: string, options?: { silent?: boolean }) => Promise<void>;
     setText: (id: string, text: string) => void;
     setConnection: (id: string, profileId: string | null) => void;
     run: (id: string, input: { text: string; mode: RunMode; offset?: number }) => Promise<void>;
@@ -96,7 +111,11 @@ const UNAVAILABLE: DbManagerApi = {
     disconnect: async () => undefined,
     toggle: () => undefined,
     refresh: () => undefined,
+    refreshRow: () => undefined,
     definition: async () => '',
+    listMeta: async () => [],
+    ops: null,
+    setContext: () => undefined,
     newQuery: () => '',
     openTable: async () => '',
     closeQuery: async () => undefined,
@@ -200,6 +219,10 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                 }
                 if (snapshot.state !== 'running' || snapshot.paused)
                     settled.current.get(queryId)?.(snapshot);
+            } else if (event.topic === 'task.state') {
+                applyTaskSnapshot(event.payload.snapshot);
+            } else if (event.topic === 'task.lost') {
+                markTasksLost(event.payload.reason);
             } else if (event.topic === 'script.progress') {
                 const { scriptId, progress } = event.payload;
                 const tab = Object.values(useQueries.getState().tabs).find(
@@ -386,18 +409,100 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
         [loadMeta],
     );
 
+    const refreshRow = useCallback(
+        (row: ExplorerRow) => {
+            // The node and everything open below it are loaded again, in place: the old lists stay
+            // on screen until the new ones arrive, and nothing reconnects.
+            const { status, meta, expanded } = useLive.getState();
+            const profiles = useProfiles.getState().profiles.filter((p) => p.id === row.profileId);
+            const below = (r: ExplorerRow) => {
+                if (row.kind === 'connection') return true;
+                if (r.database !== row.database) return false;
+                if (row.kind === 'database') return true;
+                if (r.schema !== row.schema) return false;
+                if (row.kind === 'schema') return true;
+                if (row.kind === 'group') return r.object === row.object || r.table !== undefined;
+                return r.table === row.table;
+            };
+            const loads = new Map<string, ReturnType<typeof loadsFor>[number]>();
+            const add = (r: ExplorerRow) => {
+                for (const load of loadsFor(r))
+                    loads.set(
+                        `${load.kind}|${load.database ?? ''}|${load.schema ?? ''}|${load.table ?? ''}`,
+                        load,
+                    );
+            };
+            // The node itself, even if it is collapsed (its list is what the user asked to reload).
+            add({ ...row, expanded: true });
+            for (const r of buildRows(profiles, status, meta, expanded)) {
+                if (r.expanded && below(r)) add(r);
+            }
+            for (const load of loads.values())
+                void loadMeta(
+                    row.profileId,
+                    load.kind,
+                    load.database,
+                    load.table,
+                    load.schema,
+                    true,
+                );
+        },
+        [loadMeta],
+    );
+
+    const listMeta = useCallback(
+        async (
+            profileId: string,
+            kind: string,
+            scope: { database?: string; schema?: string; name?: string } = {},
+        ) => {
+            if (!db) return [];
+            if (!(await connect(profileId))) throw new Error('Could not connect to the database.');
+            return (db.meta as (id: string, kind: string, scope: object) => Promise<unknown[]>)(
+                profileId,
+                kind,
+                scope,
+            );
+        },
+        [db, connect],
+    );
+
+    const ops = useMemo(
+        () =>
+            db ? createDbOps(db, connect, (id) => profileOf(id)?.settings.queryTimeoutMs) : null,
+        [db, connect],
+    );
+
+    const setContext = useCallback(
+        (id: string, context: { database?: string | null; schema?: string | null }) =>
+            patchQuery(id, (tab) => ({
+                database: context.database === undefined ? tab.database : context.database,
+                // A new database invalidates the schema chosen for the old one.
+                schema:
+                    context.schema !== undefined
+                        ? context.schema
+                        : context.database !== undefined && context.database !== tab.database
+                          ? null
+                          : tab.schema,
+            })),
+        [],
+    );
+
     const definition = useCallback(
         async (row: ExplorerRow) => {
             if (!db) return '';
             const isObject = row.kind === 'table' || row.kind === 'view';
             const kind =
-                row.kind === 'routine' || row.kind === 'trigger' || row.kind === 'event'
-                    ? row.kind
-                    : row.objectKind === 'materialized view' || row.objectKind === 'view'
-                      ? row.objectKind
-                      : isObject && row.kind === 'view'
-                        ? 'view'
-                        : 'table';
+                row.kind === 'routine'
+                    ? // MySQL has no definition for "a routine", only for a function or a procedure.
+                      (row.routineKind ?? 'function')
+                    : row.kind === 'trigger' || row.kind === 'event'
+                      ? row.kind
+                      : row.objectKind === 'materialized view' || row.objectKind === 'view'
+                        ? row.objectKind
+                        : isObject && row.kind === 'view'
+                          ? 'view'
+                          : 'table';
             return db.definition(row.profileId, {
                 database: row.database,
                 ...(row.schema ? { schema: row.schema } : {}),
@@ -424,7 +529,13 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                     id,
                     title: title ?? `Query ${count}`,
                     profileId: chosen,
+                    database: null,
+                    schema: null,
                     text,
+                    // A tab opened with generated text (a table's rows, a definition) is not
+                    // unsaved work: only what the user types counts.
+                    savedText: text,
+                    source: null,
                     runId: null,
                     snapshot: null,
                     log: [],
@@ -453,10 +564,10 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
     );
 
     const closeQuery = useCallback(
-        async (id: string) => {
+        async (id: string, options: { silent?: boolean } = {}) => {
             const tab = useQueries.getState().tabs[id];
             if (!tab) return;
-            if (tab.inTransaction) {
+            if (tab.inTransaction && !options.silent) {
                 const answer = await confirmAction({
                     title: `Close ${tab.title}?`,
                     message:
@@ -552,6 +663,16 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
             }
 
             await closeRun(tab.runId);
+            // The tab's database and schema are set on the shared connection before its statements,
+            // so a tab behaves the same whichever tab ran last.
+            const engine = profile.settings.engine;
+            const preface = startOfScript(
+                engine,
+                tab.database ?? undefined,
+                tab.schema ?? undefined,
+            )
+                .split(/\r?\n/)
+                .filter(Boolean);
             patchQuery(id, {
                 running: true,
                 runId: null,
@@ -562,6 +683,25 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                 explain: null,
                 explainError: null,
             });
+            if (preface.length > 0 && ops) {
+                const outcomes = await ops.execute(profile.id, preface);
+                const failed = outcomes.find((o) => !o.ok);
+                if (failed) {
+                    patchQuery(id, {
+                        running: false,
+                        bottom: 'messages',
+                        log: [
+                            {
+                                index: 0,
+                                sql: failed.sql,
+                                state: 'failed',
+                                message: `Could not switch to the chosen database or schema: ${failed.error}`,
+                            },
+                        ],
+                    });
+                    return;
+                }
+            }
             const log: StatementLog[] = [];
             const pushLog = (entry: StatementLog) => {
                 log[entry.index] = entry;
@@ -641,7 +781,7 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
             }
             patchQuery(id, { running: false });
         },
-        [db, connect, closeRun],
+        [db, connect, closeRun, ops],
     );
 
     const cancel = useCallback(
@@ -731,7 +871,11 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
                       disconnect,
                       toggle,
                       refresh,
+                      refreshRow,
                       definition,
+                      listMeta,
+                      ops,
+                      setContext,
                       newQuery,
                       openTable,
                       closeQuery,
@@ -758,7 +902,11 @@ export function useDbManagerState(bridge: DbStudioBridge | undefined): DbManager
             disconnect,
             toggle,
             refresh,
+            refreshRow,
             definition,
+            listMeta,
+            ops,
+            setContext,
             newQuery,
             openTable,
             closeQuery,

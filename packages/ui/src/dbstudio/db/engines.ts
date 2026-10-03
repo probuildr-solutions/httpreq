@@ -159,6 +159,18 @@ export const statementsToOpen = (engine: string, target: ObjectTarget, limit = 1
     }
 };
 
+/**
+ * What an opened script starts with so it runs where the user chose: the database, and for engines
+ * with schemas the schema (PostgreSQL's search path; a connection already runs on one database).
+ */
+export const startOfScript = (
+    engine: string,
+    database: string | undefined,
+    schema: string | undefined,
+): string =>
+    startOfQuery(engine, database) +
+    (engine === 'postgresql' && schema ? `SET search_path TO ${quoteName(engine, schema)};\n` : '');
+
 /** The text a new query on a database starts with. */
 export const startOfQuery = (engine: string, database: string | undefined): string => {
     if (!database) return '';

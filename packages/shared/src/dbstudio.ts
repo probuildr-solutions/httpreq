@@ -251,6 +251,17 @@ export interface DbStudioFileBridge {
         pieces: DbSavePiece[],
         eol?: DbLineEnding,
     ): Promise<DbResult<DbSaved | null>>;
+    /**
+     * Writes a query tab's text to a file. With the token of a file this window already chose it
+     * overwrites that file; otherwise a save dialog asks where. `null` means the user cancelled.
+     * The returned token stands for the file written, so a later save goes to the same place
+     * without the window ever learning the path.
+     */
+    saveText(
+        token: string | null,
+        suggestedName: string,
+        text: string,
+    ): Promise<DbResult<{ token: string; name: string; size: number } | null>>;
     /** Replaces every match in place, line by line. */
     replaceAll(
         fileId: string,
@@ -452,8 +463,125 @@ export interface DbScriptProgress {
 }
 
 /** A pushed message from the database host. */
+/* ---------- Background tasks ---------- */
+
+export type DbTaskType =
+    | 'export'
+    | 'import'
+    | 'script'
+    | 'backup'
+    | 'restore'
+    | 'bulk-update'
+    | 'index'
+    | 'query'
+    | 'parse';
+
+export type DbTaskState =
+    'PENDING' | 'RUNNING' | 'PAUSED' | 'CANCELLING' | 'CANCELLED' | 'COMPLETED' | 'FAILED';
+
+export const DB_TASK_FINAL_STATES: readonly DbTaskState[] = ['COMPLETED', 'FAILED', 'CANCELLED'];
+
+export interface DbTaskIssue {
+    record?: number;
+    statement?: number;
+    line?: number;
+    message: string;
+}
+
+/** What the task center shows for one background operation. No field is a file path. */
+export interface DbTaskSnapshot {
+    id: string;
+    name: string;
+    type: DbTaskType;
+    state: DbTaskState;
+    stage: string;
+    source?: string;
+    destination?: string;
+    database?: string;
+    target?: string;
+    file?: string;
+    connectionId?: string;
+    totalBytes?: number;
+    totalRows?: number;
+    bytesProcessed: number;
+    rowsProcessed: number;
+    percent: number | null;
+    startedAt: number | null;
+    endedAt: number | null;
+    elapsedMs: number;
+    errorCount: number;
+    issues: DbTaskIssue[];
+    message?: string;
+    error?: DbStudioError;
+    /** Where a resumed run would start; opaque to the window. */
+    checkpoint?: unknown;
+    resumable?: boolean;
+}
+
+export type DbExportFormat = 'csv' | 'json' | 'ndjson' | 'sql' | 'bson';
+export type DbImportFormat = 'csv' | 'json' | 'ndjson' | 'bson';
+
+export interface DbExportRequest {
+    connectionId: string;
+    taskId: string;
+    source:
+        | { kind: 'table'; database?: string; schema?: string; name: string }
+        | { kind: 'query'; text: string; label?: string };
+    format: DbExportFormat;
+    csv?: {
+        delimiter?: string;
+        header?: boolean;
+        bom?: boolean;
+        eol?: 'crlf' | 'lf';
+        /** What a NULL is written as; empty by default. */
+        nullText?: string;
+    };
+    sql?: { rowsPerStatement?: number; includeCreate?: boolean; includeDrop?: boolean };
+    fetchSize?: number;
+    /** The name offered in the save dialog. */
+    suggestedName?: string;
+}
+
+export interface DbImportRequest {
+    connectionId: string;
+    taskId: string;
+    /** The token of a file chosen in the file dialog. */
+    fileToken: string;
+    format: DbImportFormat;
+    target: { database?: string; schema?: string; name: string };
+    mode?: 'append' | 'truncate';
+    batchSize?: number;
+    onError?: 'stop' | 'skip';
+    transaction?: 'none' | 'batch' | 'all';
+    csv?: {
+        delimiter?: string;
+        header?: boolean;
+        columnMap?: Record<string, string>;
+        nullToken?: string;
+        emptyAsNull?: boolean;
+    };
+    /** Write rejected records to a file beside the input. */
+    saveRejects?: boolean;
+    resume?: unknown;
+}
+
+export interface DbScriptTaskRequest {
+    connectionId: string;
+    taskId: string;
+    fileToken: string;
+    dialect: 'mysql' | 'postgresql';
+    onError: 'stop' | 'continue';
+    transaction?: 'none' | 'single';
+    statementTimeoutMs?: number;
+}
+
+/** Reply to starting a task that asks for a destination: the user may cancel the dialog. */
+export type DbTaskStarted = { started: true; taskId: string } | { started: false };
+
 export type DbHostEvent =
     | { topic: 'conn.status'; payload: { connectionId: string; status: DbConnectionStatus } }
+    | { topic: 'task.state'; payload: { snapshot: DbTaskSnapshot } }
+    | { topic: 'task.lost'; payload: { reason: string } }
     | {
           topic: 'query.state';
           payload: { queryId: string; connectionId: string; snapshot: DbQuerySnapshot };
@@ -490,6 +618,14 @@ export const DB_HOST_OPS = [
     'script.start',
     'script.cancel',
     'script.close',
+    'task.export',
+    'task.import',
+    'task.script',
+    'task.list',
+    'task.cancel',
+    'task.pause',
+    'task.resume',
+    'task.remove',
 ] as const;
 
 export type DbHostOp = (typeof DB_HOST_OPS)[number];
@@ -512,7 +648,9 @@ export interface DbConnectionBridge {
 export const isDbHostEvent = (value: unknown): value is DbHostEvent =>
     isRecord(value) &&
     typeof value.topic === 'string' &&
-    ['conn.status', 'query.state', 'script.progress'].includes(value.topic) &&
+    ['conn.status', 'query.state', 'script.progress', 'task.state', 'task.lost'].includes(
+        value.topic,
+    ) &&
     isRecord(value.payload);
 
 /* ---------- Schema objects (as the explorer shows them) ---------- */

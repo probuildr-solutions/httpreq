@@ -58,6 +58,10 @@ export interface ExplorerRow {
     objectKind?: string;
     status?: DbConnectionStatus['state'];
     problem?: boolean;
+    /** For a column: it is part of the primary key. */
+    primaryKey?: boolean;
+    /** For a routine: `function` or `procedure`. */
+    routineKind?: string;
 }
 
 /** Separates the parts of a key. Names can hold any printable character, including `:` and `|`. */
@@ -142,6 +146,14 @@ export const buildRows = (
         const layout = layoutOf(engine);
         const state = status[profile.id]?.state;
         const connected = state === 'connected';
+        // Searching narrows the saved connections by name or address; a connected one always stays,
+        // because the objects under it are what the search may be for.
+        if (
+            term &&
+            !connected &&
+            !`${profile.name} ${profile.settings.host}`.toLowerCase().includes(term)
+        )
+            continue;
         const key = rowKey('c', profile.id);
         const connection: ExplorerRow = {
             key,
@@ -356,6 +368,7 @@ const groupRows = (
                         schema,
                         table: table.name,
                         object: column.name,
+                        primaryKey: column.primaryKey,
                     });
                 }
             }
@@ -406,19 +419,25 @@ const groupRows = (
     if (group.id === 'routines') {
         const routines = (items as DbRoutineInfo[]).filter((r) => match(r.name));
         row.detail = String(routines.length);
-        for (const routine of routines) rows.push(leaf('routine', 'r', routine.name, routine.kind));
+        for (const routine of routines)
+            rows.push({
+                ...leaf('routine', 'r', routine.name, routine.kind),
+                routineKind: routine.kind,
+            });
     } else if (group.id === 'triggers') {
         const triggers = (items as DbTriggerInfo[]).filter((t) => match(t.name));
         row.detail = String(triggers.length);
         for (const trigger of triggers) {
-            rows.push(
-                leaf(
+            rows.push({
+                ...leaf(
                     'trigger',
                     'tr',
                     trigger.name,
                     `${trigger.timing} ${trigger.event} on ${trigger.table}`,
                 ),
-            );
+                // The table it fires on, to drop it and to open the trigger manager there.
+                table: trigger.table,
+            });
         }
     } else {
         const events = (items as DbEventInfo[]).filter((e) => match(e.name));

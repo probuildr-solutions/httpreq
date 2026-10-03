@@ -8,3 +8,4 @@ export * from './provider';
 export * from './relaxed';
 export * from './session';
 export * from './shell';
+export * from './topology';

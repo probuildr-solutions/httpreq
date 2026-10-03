@@ -20,6 +20,12 @@
             "path": "packages/sql-parser"
         },
         {
+            "path": "packages/db-admin"
+        },
+        {
+            "path": "packages/transfer-engine"
+        },
+        {
             "path": "packages/document-engine"
         },
         {

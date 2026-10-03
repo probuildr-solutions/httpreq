@@ -20,7 +20,9 @@
         "@httpreq/mysql-engine": "*",
         "@httpreq/redis-engine": "*",
         "@httpreq/mongo-engine": "*",
-        "@httpreq/postgres-engine": "*"
+        "@httpreq/postgres-engine": "*",
+        "@httpreq/transfer-engine": "*",
+        "@httpreq/db-admin": "*"
     },
     "devDependencies": {
         "@httpreq/test-servers": "*"

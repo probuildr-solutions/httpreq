@@ -26,12 +26,16 @@ describe('desktop shell IPC validation', () => {
     });
 
     it('only opens the project documentation externally', () => {
-        expect(isAllowedExternalUrl('https://github.com/yamatrireddy/httpreq')).toBe(true);
+        expect(isAllowedExternalUrl('https://github.com/probuildr-solutions/httpreq')).toBe(true);
         expect(
-            isAllowedExternalUrl('https://github.com/yamatrireddy/httpreq/blob/main/README.md'),
+            isAllowedExternalUrl(
+                'https://github.com/probuildr-solutions/httpreq/blob/main/README.md',
+            ),
         ).toBe(true);
-        expect(isAllowedExternalUrl('https://github.com/yamatrireddy/httpreq-evil')).toBe(false);
-        expect(isAllowedExternalUrl('http://github.com/yamatrireddy/httpreq')).toBe(false);
+        expect(isAllowedExternalUrl('https://github.com/probuildr-solutions/httpreq-evil')).toBe(
+            false,
+        );
+        expect(isAllowedExternalUrl('http://github.com/probuildr-solutions/httpreq')).toBe(false);
         expect(isAllowedExternalUrl('file:///etc/passwd')).toBe(false);
         expect(isAllowedExternalUrl(42)).toBe(false);
     });

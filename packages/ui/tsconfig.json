@@ -37,6 +37,9 @@
         },
         {
             "path": "../db-core"
+        },
+        {
+            "path": "../db-admin"
         }
     ]
 }

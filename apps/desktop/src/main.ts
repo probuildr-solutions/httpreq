@@ -276,6 +276,7 @@ const dbConnections = registerDbConnections({
     userDataPath: app.getPath('userData'),
     credentials: services.credentials,
     pathOfFile: dbStudio.pathOfFile,
+    pathOfToken: dbStudio.pathOfToken,
 });
 
 /*
@@ -286,6 +287,7 @@ let shuttingDown = false;
 const updates = createUpdateController({
     loadUpdater: loadElectronUpdater,
     supported: supportsSelfUpdate(app.isPackaged, process.platform, process.env),
+    context: { currentVersion: app.getVersion(), platform: process.platform, arch: process.arch },
     onState: (state) => {
         for (const window of BrowserWindow.getAllWindows()) {
             if (!window.isDestroyed()) window.webContents.send('updates:state-changed', state);

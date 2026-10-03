@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: GPL-3.0-only
  */
 
-import type { DesktopUpdateState } from '@httpreq/shared';
+import type { DesktopUpdateErrorKind, DesktopUpdateState } from '@httpreq/shared';
 
 /**
  * Background updates, in the way VS Code does them: the app looks for a newer release shortly
@@ -33,6 +33,8 @@ export interface UpdateControllerOptions {
     onState: (state: DesktopUpdateState) => void;
     /** Runs before the app quits to install: close sockets, sessions and tunnels. */
     prepareInstall?: () => Promise<void>;
+    /** The running version, platform and CPU architecture, attached to every state for diagnostics. */
+    context?: { currentVersion: string; platform: string; arch: string };
     firstCheckDelayMs?: number;
     intervalMs?: number;
 }
@@ -40,30 +42,90 @@ export interface UpdateControllerOptions {
 const FIRST_CHECK_DELAY_MS = 20_000;
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-const message = (error: unknown) =>
+const rawMessage = (error: unknown) =>
     // The first line is the reason; electron-updater appends request details after it.
-    (error instanceof Error ? error.message : String(error)).split('\n')[0]!.slice(0, 300);
+    (error instanceof Error ? error.message : String(error)).split(/\r?\n/)[0]!.slice(0, 300);
+
+/** Strips anything that looks like a credential before a message is shown or logged. */
+const scrub = (text: string) =>
+    text
+        .replace(/(token|authorization|bearer|password|secret)[=:\s]+\S+/gi, '$1=***')
+        .replace(/\/\/[^/@\s]+:[^/@\s]+@/g, '//***:***@');
+
+/**
+ * Turns an updater failure into words for the user plus the technical detail for diagnostics. The
+ * 404 case is the one that matters most: the updater reads `latest*.yml` from the GitHub release
+ * of the repository in `app-update.yml`, and GitHub answers 404 (not 401/403) for a repository
+ * that is private, renamed without a redirect, or has no release with that metadata file.
+ */
+export const describeUpdateError = (
+    error: unknown,
+): { error: string; errorKind: DesktopUpdateErrorKind; diagnostics: string } => {
+    const diagnostics = scrub(rawMessage(error));
+    const text = `${(error as { code?: string } | null)?.code ?? ''} ${diagnostics}`;
+    if (/\b404\b|not found|ERR_UPDATER_CHANNEL_FILE_NOT_FOUND/i.test(text)) {
+        return {
+            errorKind: 'feed-not-found',
+            error: 'The update service could not find a published release for this version of the app. Try again later, or download the latest version from the releases page.',
+            diagnostics,
+        };
+    }
+    if (
+        /ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|ERR_INTERNET|ERR_NETWORK|net::|timeout/i.test(
+            text,
+        )
+    ) {
+        return {
+            errorKind: 'network',
+            error: 'The update service could not be reached. Check your internet connection and try again.',
+            diagnostics,
+        };
+    }
+    if (/sha512|checksum|ERR_UPDATER_INVALID_(?:UPDATE|DOWNLOAD)/i.test(text)) {
+        return {
+            errorKind: 'integrity',
+            error: 'The downloaded update did not pass its integrity check and was discarded.',
+            diagnostics,
+        };
+    }
+    if (/signature|publisher|code sign|ERR_UPDATER_INVALID_SIGNATURE/i.test(text)) {
+        return {
+            errorKind: 'signature',
+            error: 'The downloaded update is not signed by the expected publisher and was not installed.',
+            diagnostics,
+        };
+    }
+    return {
+        errorKind: 'unknown',
+        error: 'The update could not be completed. The installed version keeps working.',
+        diagnostics,
+    };
+};
 
 export const createUpdateController = ({
     loadUpdater,
     supported,
     onState,
     prepareInstall,
+    context,
     firstCheckDelayMs = FIRST_CHECK_DELAY_MS,
     intervalMs = CHECK_INTERVAL_MS,
 }: UpdateControllerOptions) => {
-    let state: DesktopUpdateState = { status: supported ? 'idle' : 'unsupported' };
+    let state: DesktopUpdateState = { status: supported ? 'idle' : 'unsupported', ...context };
     let updater: Promise<UpdaterLike | null> | undefined;
     let timers: NodeJS.Timeout[] = [];
 
     const set = (next: DesktopUpdateState) => {
-        state = next;
+        state = { ...next, ...context };
         try {
             onState(state);
         } catch {
             // A window that is going away must not break the update flow.
         }
     };
+
+    const fail = (error: unknown) =>
+        set({ status: 'error', version: state.version, ...describeUpdateError(error) });
 
     /** Loads the updater once and wires its events to the state. */
     const ensureUpdater = () =>
@@ -87,13 +149,11 @@ export const createUpdateController = ({
                 instance.on('update-downloaded', (info: { version?: string }) =>
                     set({ status: 'ready', version: info?.version ?? state.version }),
                 );
-                instance.on('error', (error: unknown) =>
-                    set({ status: 'error', version: state.version, error: message(error) }),
-                );
+                instance.on('error', (error: unknown) => fail(error));
                 return instance;
             },
             (error: unknown) => {
-                set({ status: 'error', error: message(error) });
+                fail(error);
                 return null;
             },
         ));
@@ -107,7 +167,7 @@ export const createUpdateController = ({
         try {
             await instance.checkForUpdates();
         } catch (error) {
-            set({ status: 'error', version: state.version, error: message(error) });
+            fail(error);
         }
         return state;
     };
@@ -138,6 +198,7 @@ export const createUpdateController = ({
             const instance = await ensureUpdater();
             if (!instance) return;
             try {
+                set({ status: 'installing', version: state.version });
                 await prepareInstall?.();
             } catch {
                 // Installing matters more than a tidy shutdown.
@@ -145,7 +206,7 @@ export const createUpdateController = ({
             try {
                 instance.quitAndInstall(false, true);
             } catch (error) {
-                set({ status: 'error', version: state.version, error: message(error) });
+                fail(error);
             }
         },
     };

@@ -33,7 +33,7 @@ import {
     type BsonDocument,
     type MongoConnectOptions,
 } from '@httpreq/db-protocol-mongo';
-import { DocumentTable, toShell, toShellLine, typeName } from './format';
+import { DocumentTable, RawDocumentTable, toShell, toShellLine, typeName } from './format';
 import { parseStatement, type Plan } from './shell';
 
 type CommandPlan = Extract<Plan, { kind: 'command' }>;
@@ -135,8 +135,10 @@ export class MongoSession implements RelationalSession {
         options: MongoConnectOptions,
         config: ConnectionConfig,
         signal?: AbortSignal,
+        /** A connection already made to `options.host`, when the topology was searched for one. */
+        connected?: MongoConnection,
     ): Promise<MongoSession> {
-        const main = await MongoConnection.connect(options, signal);
+        const main = connected ?? (await MongoConnection.connect(options, signal));
         const hello = main.hello;
         const product = hello.process === 'mongos' ? 'MongoDB (router)' : 'MongoDB';
         return new MongoSession(main, options, config, {
@@ -251,7 +253,7 @@ export class MongoSession implements RelationalSession {
                     const ns = String(cursor.ns ?? '');
                     const dot = ns.indexOf('.');
                     const collection = dot >= 0 ? ns.slice(dot + 1) : ns;
-                    const table = new DocumentTable();
+                    const table = plan.documents ? new RawDocumentTable() : new DocumentTable();
                     let first = true;
                     let count = 0;
                     let batch = (cursor.firstBatch as BsonDocument[]) ?? [];
