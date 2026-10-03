@@ -1,7 +1,7 @@
 # Distributing the macOS app
 
-HttpReq ships for macOS as a disk image (`.dmg`), a native installer (`.pkg`) and a `.zip` that the
-auto-updater downloads, each for Intel (`x64`) and Apple silicon (`arm64`). This page explains what
+HttpReq ships for macOS as a native installer (`.pkg`) and a `.zip` that the auto-updater downloads,
+each for Intel (`x64`) and Apple silicon (`arm64`). There is no disk image. This page explains what
 makes those open without a warning, what the build does about it, and how to set it up.
 
 ## What the "Not Opened" dialog means
@@ -10,8 +10,8 @@ makes those open without a warning, what the build does about it, and how to set
 > or compromise your privacy.
 
 This is Gatekeeper refusing an app that has no **Developer ID signature and Apple notarization
-ticket**. It is not a corrupt download and it is not specific to one format: a `.dmg`, a `.pkg` and
-a `.zip` of the same unsigned app all show it. Switching from one format to another cannot remove
+ticket**. It is not a corrupt download and it is not specific to one format: a `.pkg` and
+a `.zip` of the same unsigned app both show it. Switching from one format to another cannot remove
 it; only the credentials below can. The earlier, different message, _"HttpReq is damaged and can't
 be opened"_, was a real packaging fault (see [What was wrong](#what-was-wrong)), and is fixed.
 
@@ -45,18 +45,56 @@ Reviewing the packaging end to end found three faults, all fixed:
 3. **The verification script never checked a signed build.** It decided whether to check Gatekeeper
    and notarization from the signing variables, which that step of the workflow does not have, so a
    Developer ID build was only ever checked as if it were ad hoc. It now reads the signature from the
-   packages themselves and checks the app inside every zip, dmg and pkg, and the pkg's own signature
+   packages themselves and checks the app inside every zip and pkg, and the pkg's own signature
    and ticket.
+
+## Why the disk image was dropped, and what that does and does not fix
+
+The PKG is now the first-install format. Be clear about what that changes:
+
+- **It does not by itself make macOS trust the app.** A `.pkg` needs the same three things as any
+  other format (Developer ID Application certificate, Developer ID **Installer** certificate,
+  notarization with the ticket stapled to the installer). Without the Installer certificate the PKG
+  is unsigned and Gatekeeper refuses it.
+- **What it does remove** is the disk image as a variable: the image is built by `hdiutil` on the CI
+  runner (an Apple silicon machine producing the Intel image too), is deliberately left unsigned
+  because stapling would change its bytes after their checksum is recorded, and its app is copied by
+  the user from a quarantined volume. The installer is built by `productbuild`, signed, notarized and
+  stapled as one file, and its `hostArchitectures` makes an Intel/Apple silicon mix-up an installer
+  error instead of a broken app.
+- **The root cause of the Intel disk image failure was not reproduced.** Nothing in this
+  repository can be built or run off macOS, and the symptom was not recorded. What the packaging
+  review found that can break one architecture only is covered by the checks below, which fail the
+  build and name the file: `verify-packages.mjs` now checks that every Mach-O file in the app
+  (helpers, frameworks, `.node` modules), not only the main executable, contains the architecture the
+  package is for, in addition to the signature, hardened runtime, entitlements, Gatekeeper and
+  stapling checks that already ran. If the Intel package still misbehaves, the first failing check
+  in the macOS job names the cause; send that log.
+
+## Kernel and system extensions (the Electron Builder tutorial)
+
+The [macOS kernel extensions tutorial](https://www.electron.build/docs/tutorials/macos-kernel-extensions)
+does not apply. HttpReq contains no kernel extension, system extension, DriverKit driver or
+network extension, so it needs none of what that tutorial sets up: no
+`com.apple.developer.system-extension.install` entitlement, no provisioning profile, no
+`extraFiles` for a `.kext`/`.systemextension`, and no installer script that loads one. Adding them
+would make Apple reject the notarization or the app's own signature. The configuration is the
+ordinary one: Developer ID signing, hardened runtime, the three JIT/native-module entitlements below,
+notarization and stapling. If a kernel or system extension is ever added, that tutorial is where to
+start, and the installer would need the extension's own signing.
 
 ## The formats
 
 | File                               | For                                                           |
 | ---------------------------------- | ------------------------------------------------------------- |
-| `HttpReq-<version>-mac-<arch>.dmg` | A first install by drag and drop                              |
 | `HttpReq-<version>-mac-<arch>.pkg` | A first install with the native installer; managed fleets     |
 | `HttpReq-<version>-mac-<arch>.zip` | The auto-updater only (it is not offered for a first install) |
 
-Both installers come from the same signed app in the same run, so they are the same build. The PKG
+Pick the installer for the Mac: `arm64` for Apple silicon, `x64` for Intel. Each declares its host
+architecture in the installer's distribution, so the wrong one is refused with "not compatible with
+this computer" rather than installing an app that cannot start.
+
+The PKG and the ZIP come from the same signed app in the same run, so they are the same build. The PKG
 installs into `/Applications` for the whole Mac, upgrades an older copy in place (it does not leave
 the old files behind) and refuses to install over a newer version. To install it without the UI:
 
@@ -75,7 +113,7 @@ three-line change, but it should be built and checked on a Mac before it is rele
 
 You need an Apple Developer Program account, and then three things.
 
-**1. A Developer ID Application certificate** signs the app (the DMG, ZIP and PKG all contain it).
+**1. A Developer ID Application certificate** signs the app (the PKG and the ZIP both contain it).
 In the Apple Developer portal create a _Developer ID Application_ certificate, install it in Keychain
 Access, then export it with its private key as a `.p12`:
 
@@ -109,7 +147,7 @@ or an App Store Connect API key (`APPLE_API_KEY`, `APPLE_API_KEY_ID`, `APPLE_API
 `electron-builder` also accepts and which suits an organisation better.
 
 With all of them set the workflow signs the app with the hardened runtime, notarizes it, staples the
-ticket, builds the DMG and the PKG from it, signs and notarizes the PKG, and then `verify-packages.mjs`
+ticket, builds the PKG from it, signs the PKG with the Installer certificate, notarizes and staples it, and then `verify-packages.mjs`
 asks macOS itself whether it would accept each one.
 
 ### What the workflow does
@@ -178,7 +216,7 @@ all it is ad hoc signed, which is enough to run it on the Mac that built it.
 
 ## For users: opening a build that is not notarized
 
-1. Open the `.dmg` or `.pkg`; macOS shows the dialog above. Choose **Done**.
+1. Open the `.pkg`; macOS shows the dialog above. Choose **Done**.
 2. **System Settings › Privacy & Security**, scroll to the message about HttpReq, choose **Open
    Anyway**, and confirm with your password.
 3. If macOS still refuses a quarantined download, clear the flag:

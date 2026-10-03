@@ -21,6 +21,7 @@ describe('detectCapabilities', () => {
                 webSocket: {},
                 grpc: {},
                 mqtt: {},
+                dbStudio: {},
             }),
         ).toEqual({
             desktop: true,
@@ -31,6 +32,7 @@ describe('detectCapabilities', () => {
             webSocketHeaders: true,
             grpc: true,
             mqtt: true,
+            databaseStudio: true,
         });
     });
 
@@ -45,10 +47,18 @@ describe('detectCapabilities', () => {
             webSocketHeaders: true,
             grpc: false,
             mqtt: false,
+            databaseStudio: false,
         });
     });
 
     it('does not allow tunnelling without SSH, since a tunnel needs a connection to carry it', () => {
         expect(detectCapabilities({ desktop: {}, tunnels: {} }).tunneling).toBe(false);
+    });
+
+    it('offers Database Studio only when the preload actually exposed its bridge', () => {
+        expect(detectCapabilities({ desktop: {} }).databaseStudio).toBe(false);
+        expect(detectCapabilities({ desktop: {}, dbStudio: {} }).databaseStudio).toBe(true);
+        // Without the desktop shell there is no native process to run it in.
+        expect(detectCapabilities({ dbStudio: {} }).databaseStudio).toBe(false);
     });
 });

@@ -1,0 +1,28 @@
+{
+    "name": "@httpreq/db-host",
+    "version": "0.5.1",
+    "author": {
+        "name": "Yamatri Reddy",
+        "email": "yamatrireddy94@gmail.com"
+    },
+    "license": "GPL-3.0-only",
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "dependencies": {
+        "@httpreq/db-core": "*",
+        "@httpreq/connection-manager": "*",
+        "@httpreq/query-engine": "*",
+        "@httpreq/result-engine": "*",
+        "@httpreq/file-engine": "*",
+        "@httpreq/sql-parser": "*",
+        "@httpreq/mysql-engine": "*",
+        "@httpreq/redis-engine": "*",
+        "@httpreq/mongo-engine": "*",
+        "@httpreq/postgres-engine": "*"
+    },
+    "devDependencies": {
+        "@httpreq/test-servers": "*"
+    }
+}

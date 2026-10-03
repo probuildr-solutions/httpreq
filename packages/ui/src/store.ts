@@ -63,11 +63,18 @@ export const EDITOR_TABS = [
 ] as const;
 export type EditorTab = (typeof EDITOR_TABS)[number];
 
-export const SIDEBAR_VIEWS = ['collections', 'environments', 'history', 'ssh', 'tunnels'] as const;
+export const SIDEBAR_VIEWS = [
+    'collections',
+    'environments',
+    'history',
+    'ssh',
+    'tunnels',
+    'dbstudio',
+] as const;
 export type SidebarView = (typeof SIDEBAR_VIEWS)[number];
 
 /** Sidebar views that only exist in the desktop app. */
-export const DESKTOP_SIDEBAR_VIEWS: readonly SidebarView[] = ['ssh', 'tunnels'];
+export const DESKTOP_SIDEBAR_VIEWS: readonly SidebarView[] = ['ssh', 'tunnels', 'dbstudio'];
 
 /** Only in-flight and failed saves are tracked; "saved" and "modified" derive from drafts. */
 export type SaveStatus = 'saving' | 'failed';

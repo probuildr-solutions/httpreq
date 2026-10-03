@@ -25,6 +25,18 @@
         },
         {
             "path": "../codegen"
+        },
+        {
+            "path": "../editor-core"
+        },
+        {
+            "path": "../sql-parser"
+        },
+        {
+            "path": "../document-engine"
+        },
+        {
+            "path": "../db-core"
         }
     ]
 }

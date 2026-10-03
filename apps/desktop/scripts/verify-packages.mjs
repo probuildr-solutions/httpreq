@@ -41,7 +41,6 @@ const v = version.replace(/[.+]/g, '\\$&');
 const expected = {
     win: [new RegExp(`^HttpReq-Setup-${v}-x64\\.exe$`)],
     mac: ['x64', 'arm64'].flatMap((arch) => [
-        new RegExp(`^HttpReq-${v}-mac-${arch}\\.dmg$`),
         new RegExp(`^HttpReq-${v}-mac-${arch}\\.pkg$`),
         new RegExp(`^HttpReq-${v}-mac-${arch}\\.zip$`),
     ]),
@@ -79,7 +78,7 @@ if (!files.includes(metadataName)) {
         errors.push(`${metadataName} does not report version ${version}.`);
     }
     for (const name of packages.filter(Boolean)) {
-        // The deb and dmg are for first installs; only the files the updater downloads are listed.
+        // The deb and pkg are for first installs; only the files the updater downloads are listed.
         if (/\.(exe|zip|AppImage)$/.test(name) && !metadata.includes(name.replaceAll(' ', '-'))) {
             errors.push(`${metadataName} does not list ${name}.`);
         }
@@ -167,7 +166,7 @@ if (deb) {
 // macOS: an app whose signature does not verify is reported as "damaged" once downloaded, an
 // arm64 app must contain arm64 code, and an app that is not signed with a Developer ID certificate
 // and notarized is met with "Apple could not verify ..." on first open. Check what the user will
-// actually install: the app inside every zip, every dmg (mounted) and every pkg (expanded), for the
+// actually install: the app inside every zip, and every pkg (expanded), for the
 // architecture its file name claims, and the pkg's own signature and notarization.
 //
 // Whether the build was meant to be trusted is read from the packages, not from the environment
@@ -182,6 +181,36 @@ if (platform === 'mac') {
     const inspect = (command, args) => {
         const result = spawnSync(command, args, { encoding: 'utf8' });
         return { ok: result.status === 0, text: `${result.stdout ?? ''}${result.stderr ?? ''}` };
+    };
+
+    /**
+     * Every Mach-O file in the app (helpers, frameworks and the native `.node` modules) must hold the
+     * architecture the package is for. A module built for the build machine instead of the target,
+     * easy to get when one runner builds both Intel and Apple silicon, either fails to load or makes
+     * the signature check disagree with the executable, and is a plausible reason for an app that
+     * works for one architecture only.
+     */
+    const checkMachOArchitectures = (label, appPath, arch) => {
+        const wanted = archNames[arch];
+        const wrong = [];
+        for (const entry of readdirSync(appPath, { recursive: true, withFileTypes: true })) {
+            if (!entry.isFile()) continue;
+            const path = join(entry.parentPath ?? entry.path, entry.name);
+            if (!/\.(node|dylib|so)$/.test(entry.name) && !path.includes('/Contents/MacOS/')) {
+                const folder = path.includes('.framework/Versions/') || path.includes('/Helpers/');
+                if (!folder) continue;
+            }
+            const archs = inspect('lipo', ['-archs', path]);
+            if (!archs.ok) continue; // not a Mach-O file
+            if (!archs.text.trim().split(/\s+/).includes(wanted)) {
+                wrong.push(`${relative(appPath, path)} (${archs.text.trim()})`);
+            }
+        }
+        if (wrong.length > 0) {
+            errors.push(
+                `${label}: ${wrong.length} file(s) do not contain ${wanted}: ${wrong.slice(0, 8).join(', ')}`,
+            );
+        }
     };
 
     const checkApp = (label, appPath, arch) => {
@@ -203,6 +232,7 @@ if (platform === 'mac') {
         if (!archs.includes(archNames[arch])) {
             errors.push(`${label}: the executable contains ${archs.join(', ')}, expected ${arch}.`);
         }
+        checkMachOArchitectures(label, appPath, arch);
 
         const details = inspect('codesign', ['--display', '--verbose=4', appPath]).text;
         const developerId = /Authority=Developer ID Application/.test(details);
@@ -322,34 +352,6 @@ if (platform === 'mac') {
                 const target = join(scratch, `zip-${arch}`);
                 execFileSync('ditto', ['-x', '-k', join(release, zip), target]);
                 checkApp(zip, join(target, 'HttpReq.app'), arch);
-            }
-            const dmg = packages.find((name) => name?.endsWith(`-mac-${arch}.dmg`));
-            if (dmg) {
-                const mountPoint = join(scratch, `dmg-${arch}`);
-                mkdirSync(mountPoint);
-                try {
-                    const dmgPath = join(release, dmg);
-                    const checked = inspect('hdiutil', ['verify', dmgPath]);
-                    if (!checked.ok) throw new Error(checked.text);
-                    const attached = inspect('hdiutil', [
-                        'attach',
-                        '-nobrowse',
-                        '-readonly',
-                        '-mountpoint',
-                        mountPoint,
-                        dmgPath,
-                    ]);
-                    if (!attached.ok) throw new Error(attached.text);
-                    try {
-                        checkApp(dmg, join(mountPoint, 'HttpReq.app'), arch);
-                    } finally {
-                        inspect('hdiutil', ['detach', '-force', mountPoint]);
-                    }
-                } catch (error) {
-                    errors.push(
-                        `${dmg}: the disk image could not be verified or mounted. ${error.message}`,
-                    );
-                }
             }
             const pkg = packages.find((name) => name?.endsWith(`-mac-${arch}.pkg`));
             if (pkg) checkPkg(pkg, join(release, pkg), arch, scratch);

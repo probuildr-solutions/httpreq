@@ -119,7 +119,6 @@ jobs:
                       platform: mac
                       os: macos-latest
                       packages: |
-                          apps/desktop/release/HttpReq-*.dmg
                           apps/desktop/release/HttpReq-*.pkg
                           apps/desktop/release/HttpReq-*.zip
                           apps/desktop/release/HttpReq-*.zip.blockmap

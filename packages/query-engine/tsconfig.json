@@ -1,0 +1,24 @@
+{
+    "extends": "../../tsconfig.base.json",
+    "compilerOptions": {
+        "composite": true,
+        "declaration": true,
+        "emitDeclarationOnly": true,
+        "outDir": "dist-types"
+    },
+    "include": ["src"],
+    "references": [
+        {
+            "path": "../db-core"
+        },
+        {
+            "path": "../file-engine"
+        },
+        {
+            "path": "../sql-parser"
+        },
+        {
+            "path": "../result-engine"
+        }
+    ]
+}

@@ -9,7 +9,7 @@
 //   build/icon.svg           master artwork (edit this)
 //   build/icon.png           1024px PNG (electron-builder fallback)
 //   build/icon.ico           Windows executable, installer and shortcut icon
-//   build/icon.icns          macOS app and DMG icon (Apple icon-grid variant with shadow)
+//   build/icon.icns          macOS app and installer icon (Apple icon-grid variant with shadow)
 //   build/icons/NxN.png      Linux icon set (AppImage, deb, desktop entry)
 //   resources/icon.png       runtime window/taskbar icon on Windows and Linux
 //   ../web/public/favicon.*  browser favicon and touch icon

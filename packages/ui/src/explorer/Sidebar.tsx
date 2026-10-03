@@ -4,6 +4,7 @@
  */
 
 import {
+    IconDatabase,
     IconFolders,
     IconHistory,
     IconRouter,
@@ -15,6 +16,7 @@ import { SIDEBAR_WIDTH_VAR } from '../AppShell';
 import { useCapabilities } from '../capabilities';
 import { Tooltip, UnstyledButton, cx } from '../kit';
 import { clampSidebarWidth, usePreferences } from '../preferences';
+import { DbStudioPanel } from '../dbstudio/DbStudioPanel';
 import { SshPanel } from '../ssh/SshPanel';
 import { TunnelsPanel } from '../tunnels/TunnelsPanel';
 import { DESKTOP_SIDEBAR_VIEWS, useWorkbenchStore, type SidebarView } from '../store';
@@ -29,6 +31,8 @@ interface ViewDefinition {
     icon: typeof IconFolders;
     /** Only shown when the platform supports it; the browser sees it disabled instead. */
     desktopOnly?: boolean;
+    /** Needs this capability on top of being the desktop app (the add-on's own bridge). */
+    requires?: 'databaseStudio';
 }
 
 const VIEWS: ViewDefinition[] = [
@@ -37,6 +41,13 @@ const VIEWS: ViewDefinition[] = [
     { id: 'history', label: 'History', icon: IconHistory },
     { id: 'ssh', label: 'SSH', icon: IconServer, desktopOnly: true },
     { id: 'tunnels', label: 'Tunnels', icon: IconRouter, desktopOnly: true },
+    {
+        id: 'dbstudio',
+        label: 'Database Studio',
+        icon: IconDatabase,
+        desktopOnly: true,
+        requires: 'databaseStudio',
+    },
 ];
 
 const KEYBOARD_STEP = 16;
@@ -54,11 +65,17 @@ export function Sidebar({ onClearHistory, onRemoveHistory, onNavigate }: Props) 
     const setView = useWorkbenchStore((state) => state.setSidebarView);
     const capabilities = useCapabilities();
     const desktopViews = capabilities.ssh;
+    const isAvailable = (item: Pick<ViewDefinition, 'desktopOnly' | 'requires'>) =>
+        (!item.desktopOnly || desktopViews) && (!item.requires || capabilities[item.requires]);
 
     // A stored view from a desktop session must not leave the browser on an empty panel.
     useEffect(() => {
-        if (!desktopViews && DESKTOP_SIDEBAR_VIEWS.includes(view)) setView('collections');
-    }, [desktopViews, setView, view]);
+        const current = VIEWS.find((item) => item.id === view);
+        if (current && DESKTOP_SIDEBAR_VIEWS.includes(view) && !isAvailable(current)) {
+            setView('collections');
+        }
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- isAvailable only reads the two values below
+    }, [desktopViews, capabilities.databaseStudio, setView, view]);
     const width = usePreferences((state) => state.sidebarWidth);
     const setWidth = usePreferences((state) => state.setSidebarWidth);
     const [settingsId, setSettingsId] = useState<string | null>(null);
@@ -108,7 +125,7 @@ export function Sidebar({ onClearHistory, onRemoveHistory, onNavigate }: Props) 
                 aria-label="Sidebar views"
             >
                 {VIEWS.map((item) => {
-                    const unavailable = !!item.desktopOnly && !desktopViews;
+                    const unavailable = !isAvailable(item);
                     return (
                         <Tooltip
                             key={item.id}
@@ -155,6 +172,9 @@ export function Sidebar({ onClearHistory, onRemoveHistory, onNavigate }: Props) 
                 )}
                 {view === 'ssh' && desktopViews && <SshPanel onOpened={onNavigate} />}
                 {view === 'tunnels' && desktopViews && <TunnelsPanel />}
+                {view === 'dbstudio' && desktopViews && capabilities.databaseStudio && (
+                    <DbStudioPanel />
+                )}
             </div>
 
             <div

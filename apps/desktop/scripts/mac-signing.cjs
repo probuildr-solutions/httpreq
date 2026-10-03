@@ -11,7 +11,7 @@
 // workflow's credential check, and the tests.
 //
 // A macOS download is only trusted by Gatekeeper without a prompt when it is
-//   1. signed with a Developer ID Application certificate (the app, and the DMG's contents),
+//   1. signed with a Developer ID Application certificate (the app, which the PKG and ZIP contain),
 //   2. signed with a Developer ID Installer certificate (the PKG),
 //   3. notarized by Apple and the ticket stapled (the app, and the PKG).
 // Anything less shows "Apple could not verify "HttpReq" is free of malware": that is not a bug in

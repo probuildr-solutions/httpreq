@@ -45,6 +45,11 @@ export interface CommandDeps {
     openDocumentation: () => void;
     checkUpdatesNow: () => Promise<void>;
     openDialog: (dialog: AppDialog) => void;
+    /**
+     * Set while Database Studio's workspace is in front: Save, Save As and Close then act on its
+     * active file instead of the (hidden) request tabs, and the request-only commands are off.
+     */
+    studio?: { save: () => void; saveAs: () => void; close: () => void; hasTab: boolean };
 }
 
 /**
@@ -85,6 +90,7 @@ export function buildCommands(deps: CommandDeps): CommandMap {
         openDocumentation,
         checkUpdatesNow,
         openDialog,
+        studio,
     } = deps;
     const active = () => {
         const state = useWorkbenchStore.getState();
@@ -124,23 +130,24 @@ export function buildCommands(deps: CommandDeps): CommandMap {
         'request.save': {
             label: 'Save',
             shortcut: [{ key: 's', mod: true }],
-            run: () => void saveActive(),
-            disabled: tabCount === 0,
+            run: studio ? studio.save : () => void saveActive(),
+            disabled: studio ? !studio.hasTab : tabCount === 0,
         },
         'request.save-as': {
             label: 'Save As…',
             shortcut: [{ key: 's', mod: true, shift: true }],
-            run: saveActiveAs,
-            disabled: !requestTabActive,
+            run: studio ? studio.saveAs : saveActiveAs,
+            disabled: studio ? !studio.hasTab : !requestTabActive,
         },
         'request.close': {
             label: 'Close Request',
             shortcut: [{ key: 'w', mod: true }],
             run: () => {
+                if (studio) return studio.close();
                 const id = active();
                 if (id) void closeTab(id);
             },
-            disabled: tabCount === 0,
+            disabled: studio ? !studio.hasTab : tabCount === 0,
         },
         'request.send': {
             label: 'Send Request',

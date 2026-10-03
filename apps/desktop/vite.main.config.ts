@@ -9,7 +9,7 @@ export default defineConfig({
     // main process is not meant to be read back into the original TypeScript.
     esbuild: { legalComments: 'none', drop: ['debugger'] },
     build: {
-        ssr: 'src/main.ts',
+        ssr: true,
         outDir: 'dist/main',
         emptyOutDir: true,
         minify: 'esbuild',
@@ -27,7 +27,10 @@ export default defineConfig({
                 'mqtt',
                 'protobufjs',
             ],
-            output: { format: 'es', entryFileNames: 'main.js' },
+            // The file host and the database host each run in their own utility process, so they
+            // are separate entry points.
+            input: { main: 'src/main.ts', fileHost: 'src/fileHost.ts', dbHost: 'src/dbHost.ts' },
+            output: { format: 'es', entryFileNames: '[name].js' },
         },
     },
 });

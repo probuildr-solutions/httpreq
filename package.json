@@ -27,6 +27,7 @@
         "typecheck": "tsc -b --pretty false",
         "test": "vitest run",
         "test:watch": "vitest",
+        "bench:db": "vitest run --config vitest.bench.config.ts",
         "lint": "eslint . --max-warnings=0",
         "format": "prettier --write .",
         "format:check": "prettier --check .",

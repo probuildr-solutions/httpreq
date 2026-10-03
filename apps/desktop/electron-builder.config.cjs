@@ -52,7 +52,7 @@ module.exports = {
     extraMetadata: { version },
     directories: { output: 'release', buildResources: 'build' },
     // One naming scheme for every installer: no spaces (GitHub rewrites them in release asset names),
-    // and the version and architecture are always visible, e.g. HttpReq-0.2.0-mac-arm64.dmg.
+    // and the version and architecture are always visible, e.g. HttpReq-0.2.0-mac-arm64.pkg.
     artifactName: '${productName}-${version}-${os}-${arch}.${ext}',
     // Packages are attached to GitHub Releases by .github/workflows/desktop-packages.yml, never by
     // electron-builder itself (the package script passes `--publish never`). This block is what the
@@ -126,18 +126,20 @@ module.exports = {
         // Intel and Apple silicon builds, each its own app (not one universal binary: the auto-updater
         // matches the download to the architecture by file name, a universal build doubles every
         // download, and nothing in the app needs a binary that runs on both).
-        //   dmg  drag-and-drop install, the standard for a first install
-        //   pkg  the native installer, for managed fleets and scripted installs (`installer -pkg`)
+        //   pkg  the installer for a first install: signed with a Developer ID Installer certificate,
+        //        notarized and stapled. A package that is installed is not "quarantine-opened" the way
+        //        a mounted disk image's app is, and it is what managed fleets deploy
+        //        (`installer -pkg`). One per architecture; each refuses a Mac of the other kind.
         //   zip  what the auto-updater downloads; never offered for a first install
-        // They are built from the same signed app, in the same run.
+        // Both are built from the same signed app, in the same run. There is no dmg: see
+        // docs/distribution.md ("Why the disk image was dropped").
         target: [
-            { target: 'dmg', arch: ['x64', 'arm64'] },
             { target: 'pkg', arch: ['x64', 'arm64'] },
             { target: 'zip', arch: ['x64', 'arm64'] },
         ],
         // Signing. With a Developer ID certificate the app is signed with it, and notarized and
         // stapled when Apple credentials are present (the APPLE_* variables), which is the only
-        // way to open without any Gatekeeper prompt. The DMG itself is not signed (see `dmg`).
+        // way to open without any Gatekeeper prompt. The PKG is signed and notarized separately, below.
         //
         // Without one it is still signed, ad hoc (`identity: '-'`). That is not optional on Apple
         // silicon: packaging rewrites Electron's Info.plist and resources, which invalidates the
@@ -161,14 +163,16 @@ module.exports = {
         entitlements: 'build/entitlements.mac.plist',
         entitlementsInherit: 'build/entitlements.mac.plist',
     },
-    // The disk image holds the notarized, stapled app; Gatekeeper checks the app when it is opened
-    // and finds the ticket stapled to it, with no network needed. The image is deliberately not
-    // signed: a signed image would have to be notarized too, and stapling it afterwards changes its
-    // bytes after electron-builder has already recorded its checksum in latest-mac.yml.
-    dmg: { icon: 'build/icon.icns', sign: false },
     // The installer is signed with a Developer ID Installer certificate (CSC_INSTALLER_LINK in CI,
-    // or the keychain locally) and notarized, which electron-builder does for it when the APPLE_*
-    // credentials are present. An installer without that certificate is built unsigned.
+    // or the keychain locally: a separate certificate type from the one that signs the app) and,
+    // when the APPLE_* credentials are present, notarized and stapled by electron-builder right after
+    // it is built. Notarization of the installer is a second submission to Apple, after the app's own;
+    // a signed installer that is not notarized still shows "Apple could not verify" on macOS 10.15+.
+    // An installer without the certificate is built unsigned. The installer's identifier is `appId`
+    // (dev.httpreq.desktop), the same CFBundleIdentifier as the app it installs, so an upgrade
+    // replaces the app instead of installing beside it. The distribution's `hostArchitectures` is
+    // set by electron-builder from the target arch, which is what makes the x64 package refuse an
+    // Apple silicon Mac and the arm64 one an Intel Mac.
     pkg: {
         // Installs into /Applications for every user, as a drag-and-drop install does.
         installLocation: '/Applications',

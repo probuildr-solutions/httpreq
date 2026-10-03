@@ -5,6 +5,7 @@
 
 export * from './capabilities';
 export * from './codegen';
+export * from './dbstudio';
 export * from './equality';
 export * from './grpc';
 export * from './model';
@@ -18,6 +19,7 @@ export * from './validation';
 export * from './websocket';
 
 import type { HistoryEntry, HttpMethod, HttpRequest, Workspace, WorkspaceMeta } from './model';
+import type { DbStudioBridge } from './dbstudio';
 import type { GrpcBridge } from './grpc';
 import type { MqttBridge } from './mqtt';
 import type { SshBridge, TunnelBridge } from './ssh';
@@ -384,4 +386,5 @@ export interface HttpReqBridge {
     tunnels?: TunnelBridge;
     grpc?: GrpcBridge;
     mqtt?: MqttBridge;
+    dbStudio?: DbStudioBridge;
 }
